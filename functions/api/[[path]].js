@@ -21,6 +21,7 @@ const TEACHER_ONLY = new Set(["notices", "schoolMeetings", "schoolAttendance", "
 const ID_RE = /^[A-Za-z0-9_\-.~:@+]{1,200}$/;
 const MAX_DOC_BYTES = 300 * 1024;          // 글 하나 최대 크기 (첨부 제외)
 const MAX_ATTACH_BYTES = 8 * 1024 * 1024;  // 첨부파일 하나 최대 크기
+const MAX_NOTICE_IMAGES = 6;               // 안내 하나에 올릴 수 있는 사진 수
 const TOKEN_HOURS = 12;                    // 로그인 유지 시간
 
 const K = {
@@ -250,11 +251,40 @@ async function putDoc(request, env, auth) {
     data.attach = { id: attId, name: attachToStore.name, type: attachToStore.type, size: bytes.length };
   } else if (data.attach && data.attach.data) delete data.attach.data;
 
+  // 안내(notices)의 사진: 여러 장을 따로 저장하고, 누구나 볼 수 있게 표시해요. (안내는 교사만 쓸 수 있어요)
+  const imagesToStore = [];
+  if (col === "notices" && Array.isArray(data.images)) {
+    if (!auth.teacher) throw new HttpError(403, "선생님만 쓸 수 있어요.");
+    if (data.images.length > MAX_NOTICE_IMAGES) throw new HttpError(400, `사진은 ${MAX_NOTICE_IMAGES}장까지 올릴 수 있어요.`);
+    data.images = data.images.map(img => {
+      if (img && typeof img.data === "string") {
+        const m = /^data:(image\/[a-z0-9.+-]+);base64,(.*)$/is.exec(img.data);
+        if (!m) throw new HttpError(400, "사진 파일만 올릴 수 있어요.");
+        const bytes = Uint8Array.from(atob(m[2]), c => c.charCodeAt(0));
+        if (bytes.length > MAX_ATTACH_BYTES) throw new HttpError(413, "사진이 너무 커요.");
+        const attId = randomId(20);
+        const name = String(img.name || "photo.jpg").slice(0, 200);
+        imagesToStore.push({ attId, bytes, name, type: m[1] });
+        return { id: attId, name, type: m[1], size: bytes.length };
+      }
+      if (img && ID_RE.test(String(img.id || ""))) return { id: img.id, name: String(img.name || "photo").slice(0, 200), type: String(img.type || "image/jpeg").slice(0, 100), size: Number(img.size) || 0 };
+      return null;
+    }).filter(Boolean);
+  }
+  if (col === "notices" && data.links !== undefined) {
+    data.links = (Array.isArray(data.links) ? data.links : []).slice(0, 10)
+      .map(l => ({ url: String(l?.url || "").trim().slice(0, 500), label: String(l?.label || "").trim().slice(0, 100) }))
+      .filter(l => /^https?:\/\//i.test(l.url));
+  }
+
   const text = JSON.stringify(data);
   if (text.length > MAX_DOC_BYTES) throw new HttpError(413, "글이 너무 길어요.");
 
   const db0 = await loadDb(env);
   const checked = checkWrite(auth, pins, col, db0.collections[col][id], data);
+  for (const im of imagesToStore) {
+    await env.KV.put(K.att(im.attId), im.bytes, { metadata: { name: im.name, type: im.type, from: "", public: true, size: im.bytes.length } });
+  }
   if (attachToStore) {
     await env.KV.put(K.att(attachToStore.attId), attachToStore.bytes, {
       metadata: { name: attachToStore.name, type: attachToStore.type, from: data.from || "", size: attachToStore.bytes.length },
@@ -267,7 +297,7 @@ async function putDoc(request, env, auth) {
     checkWrite(auth, pins, col, old, data);
     db.collections[col][id] = { ...checked, _w: stamp };
   });
-  return json({ ok: true, w: stamp, attach: data.attach || null });
+  return json({ ok: true, w: stamp, attach: data.attach || null, doc: { ...checked, _w: stamp } });
 }
 
 async function deleteDoc(request, env, auth) {
@@ -298,18 +328,20 @@ async function putPin(request, env, auth) {
 }
 
 // ---------------------------------------------------------------------
-// 첨부파일 내려받기 (교사, 또는 보낸 전교임원 본인)
+// 첨부파일 내려받기 (교사, 또는 보낸 전교임원 본인 / 안내 사진은 누구나)
 async function getAttach(id, env, auth) {
   if (!ID_RE.test(id)) throw new HttpError(400, "잘못된 주소예요.");
   const { value, metadata } = await env.KV.getWithMetadata(K.att(id), "arrayBuffer");
   if (!value) throw new HttpError(404, "파일을 찾을 수 없어요.");
-  if (!auth.teacher && !(auth.council && metadata?.from === auth.council)) throw new HttpError(403, "볼 수 있는 권한이 없어요.");
+  const isPublic = !!metadata?.public;
+  if (!isPublic && !auth.teacher && !(auth.council && metadata?.from === auth.council)) throw new HttpError(403, "볼 수 있는 권한이 없어요.");
   const name = metadata?.name || "file";
   return new Response(value, {
     headers: {
       "content-type": metadata?.type || "application/octet-stream",
-      "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
-      "cache-control": "private, max-age=3600",
+      "content-disposition": `${isPublic ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(name)}`,
+      "cache-control": isPublic ? "public, max-age=86400" : "private, max-age=3600",
+      "x-content-type-options": "nosniff",
     },
   });
 }
@@ -333,7 +365,9 @@ async function backupSave(env, auth) {
   return json(meta);
 }
 async function attachmentIds(collections) {
-  return Object.values(collections?.sends || {}).map(d => d?.attach?.id).filter(id => id && ID_RE.test(id));
+  const ids = Object.values(collections?.sends || {}).map(d => d?.attach?.id);
+  for (const n of Object.values(collections?.notices || {})) for (const im of (n?.images || [])) ids.push(im?.id);
+  return ids.filter(id => id && ID_RE.test(id));
 }
 async function backupFile(env, auth) {
   needTeacher(auth);
@@ -386,7 +420,7 @@ async function backupRestore(request, env, auth) {
     for (const [id, a] of Object.entries(src.attachments)) {
       if (!ID_RE.test(id) || !a?.data) continue;
       const bytes = Uint8Array.from(atob(a.data), c => c.charCodeAt(0));
-      await env.KV.put(K.att(id), bytes, { metadata: { name: a.name || "file", type: a.type || "application/octet-stream", from: a.from || "", size: bytes.length } });
+      await env.KV.put(K.att(id), bytes, { metadata: { name: a.name || "file", type: a.type || "application/octet-stream", from: a.from || "", public: !!a.public, size: bytes.length } });
     }
   }
   // 예전 Artifact 백업에 들어 있던 비밀번호 기록(access)은 형식이 달라서 옮기지 않아요.

@@ -79,6 +79,9 @@ const API = (() => {
   }
   return {
     req, login, logout, syncScopes, download, blobUrl, saveBlob,
+    limits: { attach: 8 * 1024 * 1024, image: 1200 * 1024, noticeImages: 6 },
+    fileUrl: id => `/api/attach/${id}`,
+    canChangeTeacherPassword: false,     // 교사 비밀번호는 Cloudflare 환경변수(ADMIN_PASSWORD)로 정해요
     get tokens() { return tokens; },
   };
 })();
@@ -199,7 +202,7 @@ function makeDb(onMeta) {
     const [col, id] = key.split("/");
     if (p.op === "delete") return API.req("DELETE", `/doc?col=${encodeURIComponent(col)}&id=${encodeURIComponent(id)}`);
     const r = await API.req("PUT", "/doc", { col, id, data: p.payload, w: p.w });
-    if (r?.attach && p.data.attach) p.data = { ...p.data, attach: r.attach }; // 첨부는 서버가 따로 보관해요
+    if (r?.doc) { p.data = Object.freeze({ ...r.doc }); const { _w, ...rest } = r.doc; p.payload = rest; notify(); } // 사진·첨부는 서버가 따로 보관하고 주소만 남겨요
     return r;
   }
   async function write(col, id, op, data) {

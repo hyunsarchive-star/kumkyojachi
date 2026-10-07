@@ -35,7 +35,7 @@ const STATUS = {new:"접수", review:"검토 중", done:"답변 완료"};
 const state = {
   db:null, teacher:false, dbReady:false, dbFailed:false,
   data:{notices:[], schoolMeetings:[], meetings:[], activities:[], suggestions:[], agendas:[], sends:[]},
-  ctab:"pledge", sFilter:"all", agendaDraft:null,
+  ctab:"pledge", sFilter:"all", agendaDraft:null, editing:null,
   pins:{classes:{}, council:{}}, pinsLoaded:false, pinsExists:false, units:new Set(), councilUser:null, lockErr:"",
   backupMeta:null, fileMeta:null, restorePending:null, busy:"", sendFile:null, downloads:null,
   homeComposing:false, route:"home", loginErr:"", exSaving:false, adminConfigured:true,
@@ -81,7 +81,7 @@ function readHash(){
   state.classId=null; state.route="home";
 }
 function go(id){
-  state.composing=false; state.homeComposing=false; state.confirmDel=null;
+  state.composing=false; state.homeComposing=false; state.editing=null; state.confirmDel=null;
   if (id==="teacher"){ location.hash="teacher"; }
   else if (id==="council"){ location.hash="council"; }
   else if (id){ location.hash = "c"+id; }
@@ -98,7 +98,18 @@ function render(){
   else if (state.route==="teacher") v = teacherView();
   else if (state.route==="council") v = (!state.teacher && !state.councilUser) ? councilLogin() : councilView();
   else v = homeView();
+  // 사진을 고르는 등 화면을 다시 그릴 때, 쓰던 글이 지워지지 않게 그대로 옮겨요.
+  const keep={};
+  app.querySelectorAll("form[data-key]").forEach(f=>{
+    const vals={}; f.querySelectorAll("input[id],textarea[id],select[id]").forEach(el=>{
+      if (el.type==="file") return; vals[el.id] = (el.type==="checkbox") ? {c:el.checked} : {v:el.value};
+    }); keep[f.dataset.key]=vals;
+  });
   app.replaceChildren(v);
+  app.querySelectorAll("form[data-key]").forEach(f=>{
+    const vals=keep[f.dataset.key]; if (!vals) return;
+    for (const [id,o] of Object.entries(vals)){ const el=f.querySelector("#"+CSS.escape(id)); if (!el) continue; if ("c" in o) el.checked=o.c; else el.value=o.v; }
+  });
 }
 
 function roleBadge(){
@@ -133,10 +144,11 @@ function homeView(){
     statusBanner(),
     h("section",{class:"floor council-floor"},
       h("div",{}, h("h2",{},"전교임원"), h("div",{class:"sub"},"회장 1 · 부회장 2")),
-      h("button",{class:"door cdoor","aria-label":"전교임원 화면 들어가기",onclick:()=>go("council")},
-        h("div",{class:"cplates"}, SCHOOL_ROLES.map(([k,l])=>h("div",{class:"plate"},
-          h("span",{},l), h("b",{}, officerLabel(k))))),
-        h("div",{class:"meta"}, h("span",{},"공약 · 회의 안건 · 전교 건의 모아보기 · 활동 기록"), h("span",{},"들어가기 →"))
+      h("div",{class:"door cdoor"},
+        h("div",{class:"cplates"}, SCHOOL_ROLES.map(([k,l])=>h("button",{class:"plate cpick","aria-label":`${l} 로그인`,onclick:()=>openCouncilAs(k)},
+          h("span",{},l), h("b",{}, officerLabel(k)), h("small",{}, state.councilUser===k ? "로그인 중 · 들어가기 →" : "눌러서 로그인 →")))),
+        h("div",{class:"meta"}, h("span",{},"내 이름을 눌러 로그인해요 · 공약 · 회의 안건 · 전교 건의 · 활동 기록 · 선생님께 보내기"),
+          h("button",{class:"linkbtn",onclick:()=>go("council")},"둘러보기 →"))
       )
     ),
     h("div",{class:"hall"},
@@ -175,36 +187,56 @@ function homeView(){
 /* ----- 전교회의 결과 (공통) ----- */
 function todayYmd(){ const t=new Date(); return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`; }
 function closeCompose(){ state.composing=false; state.homeComposing=false; render(); }
-function schoolForm(){
+function schoolForm(m){
+  const v=m||{};
   return h("form",{class:"compose",style:"--gc:var(--ink)",onsubmit:e=>{e.preventDefault();
     const f=e.target;
-    save("school",{date:f.w_date.value, topic:f.w_topic.value.trim(), result:f.w_result.value.trim(), relay:f.w_relay.value.trim(), author:f.w_author.value.trim(), classId:"all"}, null, "모든 반에 발송했어요");
+    const body={date:f.w_date.value, topic:f.w_topic.value.trim(), result:f.w_result.value.trim(), relay:f.w_relay.value.trim(), author:f.w_author.value.trim(), classId:"all"};
+    if (m) saveEdit("school", m.id, body, "수정한 내용을 모든 반에 다시 보냈어요");
+    else save("school", body, null, "모든 반에 발송했어요");
   }},
+    m ? h("div",{class:"info",style:"font-weight:500;color:var(--ink)"},"전교회의 결과 수정 중 · 저장하면 모든 반 페이지에 고친 내용이 보여요") : null,
     h("div",{class:"row"},
-      h("label",{},"회의 날짜", h("input",{type:"date",id:"w_date",name:"w_date",required:true,value:todayYmd()})),
-      h("label",{},"기록한 사람", h("input",{type:"text",id:"w_author",name:"w_author",required:true,maxlength:"30",placeholder:"예: 전교 부회장 정유나"}))
+      h("label",{},"회의 날짜", h("input",{type:"date",id:"w_date",name:"w_date",required:true,value:v.date||todayYmd()})),
+      h("label",{},"기록한 사람", h("input",{type:"text",id:"w_author",name:"w_author",required:true,maxlength:"30",value:v.author||"",placeholder:"예: 전교 부회장 정유나"}))
     ),
-    h("label",{},"회의 주제(안건)", h("input",{type:"text",id:"w_topic",name:"w_topic",required:true,maxlength:"100",placeholder:"예: 11월 학교 축제 반별 부스 정하기"})),
-    h("label",{},"결정한 내용", h("textarea",{id:"w_result",name:"w_result",required:true,placeholder:"전교회의에서 정한 내용을 적어 주세요."})),
-    h("label",{},"각 반에 전달할 내용 (선택)", h("textarea",{id:"w_relay",name:"w_relay",style:"min-height:60px",placeholder:"예: 각 반 대표는 금요일까지 부스 주제를 정해 오세요."})),
+    h("label",{},"회의 주제(안건)", h("input",{type:"text",id:"w_topic",name:"w_topic",required:true,maxlength:"100",value:v.topic||"",placeholder:"예: 11월 학교 축제 반별 부스 정하기"})),
+    h("label",{},"결정한 내용", h("textarea",{id:"w_result",name:"w_result",required:true,placeholder:"전교회의에서 정한 내용을 적어 주세요."}, v.result||"")),
+    h("label",{},"각 반에 전달할 내용 (선택)", h("textarea",{id:"w_relay",name:"w_relay",style:"min-height:60px",placeholder:"예: 각 반 대표는 금요일까지 부스 주제를 정해 오세요."}, v.relay||"")),
     h("div",{class:"actions"},
-      h("button",{type:"button",class:"btn ghost",onclick:closeCompose},"취소"),
-      h("button",{type:"submit",class:"btn"},"모든 반에 발송")
+      h("button",{type:"button",class:"btn ghost",onclick:()=>{ if(m){ state.editing=null; render(); } else closeCompose(); }},"취소"),
+      h("button",{type:"submit",class:"btn"}, m ? "수정 저장" : "모든 반에 발송")
     )
   );
+}
+/* ----- 교사 글 수정 (안내 · 전교회의 결과) ----- */
+function isEditing(kind, id){ return state.editing && state.editing.kind===kind && state.editing.id===id; }
+function startEdit(kind, id){
+  state.editing={kind, id}; state.noticeDraft=null; state.composing=false; state.homeComposing=false; state.confirmDel=null; render();
+  setTimeout(()=>document.querySelector("form.compose input[type=text], form.compose textarea")?.focus(),0);
+}
+function editBtn(kind, d){
+  if (!state.teacher || state.editing) return null;
+  return h("button",{class:"btn small ghost",onclick:()=>startEdit(kind,d.id)},"수정");
+}
+function editedNote(d){ return d.editedAt ? ` · ${fmtDate(d.editedAt)} 수정됨` : ""; }
+async function saveEdit(kind, id, body, msg){
+  const btn=document.querySelector("form.compose button[type=submit]"); if(btn) btn.disabled=true;
+  try{ await state.db.collection(COLL[kind]).doc(id).update({...body, editedAt:Date.now()}); state.editing=null; state.noticeDraft=null; render(); toast(msg); }
+  catch(e){ if(btn) btn.disabled=false; toast(e?.message||"수정하지 못했어요. 다시 시도해 주세요."); }
 }
 function schoolList(max){
   let list=state.data.schoolMeetings.slice().sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.createdAt-a.createdAt));
   if (max) list=list.slice(0,max);
   if (!list.length) return emptyState("아직 전교회의 결과가 없어요", state.teacher ? "‘전교회의 결과 발송’을 누르면 모든 반에 함께 전달돼요." : "전교회의가 끝나면 결과가 여기에 올라와요.");
-  return h("div",{class:"list"}, list.map(m=>h("article",{class:"card"},
+  return h("div",{class:"list"}, list.map(m=> isEditing("school",m.id) ? schoolForm(m) : h("article",{class:"card"},
     h("div",{class:"head"}, h("h3",{},m.topic), h("span",{class:"pill all"},fmtYmd(m.date)+" 전교회의")),
     h("dl",{},
       h("dt",{},"결정"), h("dd",{},m.result),
       m.relay ? [h("dt",{},"전달"), h("dd",{},m.relay)] : null
     ),
     attendanceBlock(m.date),
-    h("div",{class:"head"}, h("span",{class:"info"},`기록: ${m.author||"-"}`), delControls("school",m))
+    h("div",{class:"head"}, h("span",{class:"info"},`기록: ${m.author||"-"}${editedNote(m)}`), h("span",{style:"display:flex;gap:6px;flex-wrap:wrap"}, editBtn("school",m), delControls("school",m)))
   )));
 }
 function schoolPane(){
@@ -240,17 +272,29 @@ function classView(){
     h("div",{class:"classhead"},
       h("div",{style:"display:flex;align-items:center;gap:14px;flex-wrap:wrap"},
         h("div",{class:"plate"}, h("b",{},id)),
-        h("h1",{style:"font-size:26px"},`${g}학년 ${c}반 자치회`)
+        h("div",{style:"display:grid;gap:4px"},
+          h("h1",{style:"font-size:26px"},`${g}학년 ${c}반 자치회`),
+          officerLines(id))
       ),
       roleBadge()
     ),
     statusBanner(),
     h("div",{class:"tabs",role:"tablist"},
       TABS.map(t=>h("button",{class:"tab",role:"tab","aria-selected":String(state.tab===t.id),
-        onclick:()=>{state.tab=t.id;state.composing=false;state.confirmDel=null;render();}},
+        onclick:()=>{state.tab=t.id;state.composing=false;state.confirmDel=null;state.editing=null;render();}},
         t.label, h("span",{class:"count"},counts[t.id]||""), h("span",{class:"who"},t.who)))
     ),
     h("div",{role:"tabpanel"}, paneFor(state.tab))
+  );
+}
+
+/* 반 페이지 머리말: 회장 / 그 밑에 부회장 */
+function officerLines(id){
+  const o=state.officers[id]||{};
+  const nm=v=>v ? h("b",{},v) : h("span",{class:"muted"},"미등록");
+  return h("div",{class:"olines"},
+    h("div",{}, h("span",{class:"orole"},"회장"), nm(o.president)),
+    h("div",{}, h("span",{class:"orole"},"부회장"), nm(o.vpBoy), h("span",{class:"muted",style:"font-size:12px"},"(남)"), nm(o.vpGirl), h("span",{class:"muted",style:"font-size:12px"},"(여)"))
   );
 }
 
@@ -272,7 +316,7 @@ function writeAllowed(kind){
 function intro(text, kind, btnLabel){
   return h("div",{class:"pane-intro"},
     h("p",{},text),
-    writeAllowed(kind) && !state.composing ? h("button",{class:"btn",onclick:()=>{state.composing=true;render();setTimeout(()=>document.querySelector("form.compose input,form.compose textarea")?.focus(),0);}},btnLabel) : null
+    writeAllowed(kind) && !state.composing && !state.editing ? h("button",{class:"btn",onclick:()=>{state.composing=true;state.noticeDraft=null;render();setTimeout(()=>document.querySelector("form.compose input,form.compose textarea")?.focus(),0);}},btnLabel) : null
   );
 }
 
@@ -294,20 +338,81 @@ function noticePane(){
   const id=state.classId, list=noticesFor(id);
   return h("div",{},
     intro("선생님이 우리 반 또는 전체 학생에게 알리는 내용이에요.", "notice", "안내 쓰기"),
-    state.composing && writeAllowed("notice") ? h("form",{class:"compose",onsubmit:e=>{e.preventDefault();
-      const f=e.target;
-      save("notice",{title:f.n_title.value.trim(), body:f.n_body.value.trim(), classId:f.n_all.checked?"all":id});
-    }},
-      h("label",{},"제목", h("input",{type:"text",id:"n_title",name:"n_title",required:true,maxlength:"80",placeholder:"예: 10월 학급회의 주제 안내"})),
-      h("label",{},"내용", h("textarea",{id:"n_body",name:"n_body",required:true,placeholder:"학생들에게 알릴 내용을 적어 주세요."})),
-      h("label",{class:"check"}, h("input",{type:"checkbox",id:"n_all",name:"n_all"}), "모든 반(4~6학년)에 함께 안내하기"),
-      formActions()
-    ) : null,
-    list.length ? h("div",{class:"list"}, list.map(n=>h("article",{class:"card"},
-      h("div",{class:"head"}, h("h3",{},n.title), n.classId==="all"?h("span",{class:"pill all"},"전체 안내"):null),
+    state.composing && writeAllowed("notice") ? noticeForm(id) : null,
+    list.length ? h("div",{class:"list"}, list.map(n=> isEditing("notice",n.id) ? noticeForm(id, n) : h("article",{class:"card"},
+      h("div",{class:"head"}, h("h3",{},n.title), n.classId==="all"?h("span",{class:"pill all"},"전체 안내"):h("span",{class:"pill all"},`${n.classId}반 안내`)),
       h("p",{},n.body),
-      h("div",{class:"head"}, h("span",{class:"info"},fmtDate(n.createdAt)), delControls("notice",n))
+      noticeMedia(n),
+      h("div",{class:"head"}, h("span",{class:"info"},fmtDate(n.createdAt)+editedNote(n)), h("span",{style:"display:flex;gap:6px;flex-wrap:wrap"}, editBtn("notice",n), delControls("notice",n)))
     ))) : emptyState("아직 안내가 없어요", state.teacher ? "‘안내 쓰기’를 눌러 첫 안내를 올려 보세요." : "선생님이 안내를 올리면 여기에 보여요.")
+  );
+}
+
+/* 안내에 붙이는 사진·링크 */
+const MAX_NOTICE_IMAGES = API.limits?.noticeImages || 6;
+function noticeDraft(n){
+  const key = n ? n.id : "new";
+  if (!state.noticeDraft || state.noticeDraft.key!==key)
+    state.noticeDraft = {key, images:[...((n&&n.images)||[])]};
+  return state.noticeDraft;
+}
+async function addNoticeImages(files){
+  const d=state.noticeDraft; if (!d) return;
+  for (const f of files){
+    if (d.images.length>=MAX_NOTICE_IMAGES){ toast(`사진은 ${MAX_NOTICE_IMAGES}장까지 올릴 수 있어요.`); break; }
+    if (!f.type.startsWith("image/")){ toast("사진 파일만 올릴 수 있어요."); continue; }
+    try{ d.images.push(f.type==="image/gif" && f.size<=MAX_IMAGE ? {name:f.name, type:f.type, data:await fileToDataURL(f)} : await shrinkImage(f)); }
+    catch{ toast(`${f.name} 사진을 읽지 못했어요.`); }
+  }
+  render();
+}
+function imgSrc(im){ return im.data || API.fileUrl(im.id, render) || ""; }
+function parseLinks(text){
+  return text.split("\n").map(t=>t.trim()).filter(Boolean).map(line=>{
+    const m=line.match(/(https?:\/\/\S+)/i); if(!m) return null;
+    const label=line.replace(m[1],"").replace(/[-–:|]+\s*$/,"").trim();
+    return {url:m[1], label};
+  }).filter(Boolean);
+}
+function noticeMedia(n){
+  const imgs=n.images||[], links=n.links||[];
+  if (!imgs.length && !links.length) return null;
+  return h("div",{class:"nmedia"},
+    imgs.length ? h("div",{class:"nimgs"}, imgs.map(im=>h("a",{href:imgSrc(im),target:"_blank",rel:"noopener",title:"크게 보기"}, h("img",{src:imgSrc(im),alt:im.name||"안내 사진",loading:"lazy"})))) : null,
+    links.length ? h("ul",{class:"nlinks"}, links.map(l=>h("li",{}, "🔗 ", h("a",{href:l.url,target:"_blank",rel:"noopener"}, l.label||l.url)))) : null
+  );
+}
+
+function noticeForm(id, n){
+  const v=n||{};
+  const dr=noticeDraft(n);
+  return h("form",{class:"compose","data-key":"notice-"+dr.key,onsubmit:e=>{e.preventDefault();
+    const f=e.target;
+    const body={title:f.n_title.value.trim(), body:f.n_body.value.trim(), classId:f.n_all.checked?"all":(n && n.classId!=="all" ? n.classId : id),
+      images:dr.images, links:parseLinks(f.n_links.value)};
+    const bad=f.n_links.value.split("\n").map(t=>t.trim()).filter(t=>t && !/https?:\/\//i.test(t));
+    if (bad.length){ toast("링크는 http:// 또는 https:// 로 시작하는 주소를 적어 주세요."); return; }
+    if (n) saveEdit("notice", n.id, body, "안내를 수정했어요");
+    else save("notice", body);
+  }},
+    n ? h("div",{class:"info",style:"font-weight:500;color:var(--gc)"},"안내 수정 중 · 저장하면 받는 반 모두에게 고친 내용이 보여요") : null,
+    h("label",{},"제목", h("input",{type:"text",id:"n_title",name:"n_title",required:true,maxlength:"80",value:v.title||"",placeholder:"예: 10월 학급회의 주제 안내"})),
+    h("label",{},"내용", h("textarea",{id:"n_body",name:"n_body",required:true,placeholder:"학생들에게 알릴 내용을 적어 주세요."}, v.body||"")),
+    h("div",{class:"nupload"},
+      h("label",{},`사진 (선택 · ${MAX_NOTICE_IMAGES}장까지 · 자동으로 줄여서 올려요)`,
+        h("input",{type:"file",id:"n_imgs",accept:"image/*",multiple:true,onchange:e=>{ addNoticeImages([...e.target.files]); e.target.value=""; }})),
+      dr.images.length ? h("div",{class:"nthumbs"}, dr.images.map((im,i)=>h("div",{class:"nthumb"},
+        h("img",{src:imgSrc(im),alt:im.name||"사진"}),
+        h("button",{type:"button",class:"btn small ghost",onclick:()=>{dr.images.splice(i,1);render();},"aria-label":`${im.name||"사진"} 빼기`},"빼기")))) : null
+    ),
+    h("label",{},"링크 (선택 · 한 줄에 하나씩 · 주소 앞에 설명을 적어도 돼요)",
+      h("textarea",{id:"n_links",name:"n_links",style:"min-height:60px",placeholder:"예: 가정통신문 https://school.example.kr/notice/123\nhttps://padlet.com/우리학교/자치회"},
+        (v.links||[]).map(l=>(l.label?l.label+" ":"")+l.url).join("\n"))),
+    h("label",{class:"check"}, h("input",{type:"checkbox",id:"n_all",name:"n_all",checked:v.classId==="all"}), "모든 반(4~6학년)에 함께 안내하기"),
+    n ? h("div",{class:"actions"},
+          h("button",{type:"button",class:"btn ghost",onclick:()=>{state.editing=null;render();}},"취소"),
+          h("button",{type:"submit",class:"btn"},"수정 저장"))
+      : formActions()
   );
 }
 
@@ -458,7 +563,7 @@ function teacherView(){
     h("p",{},"교사 비밀번호를 입력하면 모든 반 관리, 안내·전교회의 발송, 건의 답변을 할 수 있어요."),
     h("form",{style:"display:grid;gap:10px",onsubmit:async e=>{e.preventDefault();
       const btn=e.target.querySelector("button[type=submit]"); btn.disabled=true;
-      try{ await API.login("teacher", null, e.target.pin.value); state.loginErr=""; syncTeacher(); await state.db.refresh(); render(); loadBackupMeta(); }
+      try{ const lr=await API.login("teacher", null, e.target.pin.value); state.loginErr=""; if (lr?.firstTime) toast("처음이라 이 비밀번호를 교사 비밀번호로 정했어요"); syncTeacher(); await state.db.refresh(); render(); loadBackupMeta(); }
       catch(err){ btn.disabled=false; state.loginErr = err.code==="wrong_password" ? "비밀번호가 맞지 않아요." : (err.message||"로그인하지 못했어요."); render(); setTimeout(()=>document.getElementById("pin")?.focus(),0); }
     }},
       h("label",{},"비밀번호", h("input",{type:"password",id:"pin",name:"pin",autocomplete:"current-password",required:true})),
@@ -489,7 +594,7 @@ function dashboard(){
     statusBanner(),
     h("div",{class:"tabs",role:"tablist",style:"--gc:var(--ink)"},
       [["classes","반 현황"],["inbox",`받은 자료${state.data.sends.filter(x=>x.status!=="seen").length?" "+state.data.sends.filter(x=>x.status!=="seen").length:""}`],["attend","전교회의 출결"],["org","자치회 관리"],["pledge","전교임원 공약"],["backup","백업·설정"]].map(([k,l])=>
-        h("button",{class:"tab",role:"tab","aria-selected":String(state.dtab===k),onclick:()=>{state.dtab=k;state.homeComposing=false;render();}},l))
+        h("button",{class:"tab",role:"tab","aria-selected":String(state.dtab===k),onclick:()=>{state.dtab=k;state.homeComposing=false;state.editing=null;render();}},l))
     ),
     state.dtab==="inbox" ? inboxPage() : state.dtab==="backup" ? backupPage() : state.dtab==="attend" ? attendPage() : state.dtab==="org" ? orgPage() : state.dtab==="pledge" ? pledgePane() : classesPage(pending, lastMeeting)
   );
@@ -505,8 +610,10 @@ function classesPage(pending, lastMeeting){
           h("div",{class:"plate"}, h("b",{},id), h("span",{},"반")),
           h("dl",{},
             h("dt",{},"회장"), h("dd",{}, state.officers[id]?.president || h("span",{class:"muted"},"미등록")),
-            h("dt",{},"답변 기다리는 건의"), h("dd",{class:open?"alert":""},`${open}건`),
-            h("dt",{},"10월 기지개 체조"), h("dd",{class:ex.ok===ex.total?"good":""},`${ex.count}회 · ${ex.ok}/${ex.total}주 달성`),
+            h("dt",{},"부회장 (남)"), h("dd",{}, state.officers[id]?.vpBoy || h("span",{class:"muted"},"미등록")),
+            h("dt",{},"부회장 (여)"), h("dd",{}, state.officers[id]?.vpGirl || h("span",{class:"muted"},"미등록")),
+            h("dt",{},"미답변 건의"), h("dd",{class:open?"alert":""},`${open}건`),
+            h("dt",{},"10월 체조"), h("dd",{class:ex.ok===ex.total?"good":""},`${ex.count}회 · ${ex.ok}/${ex.total}주 달성`),
             h("dt",{},"최근 학급회의"), h("dd",{},lastMeeting(id))
           ));
       }))
@@ -683,7 +790,8 @@ const CTABS = [
   {id:"allsug", label:"전교 건의 모아보기"},
   {id:"school", label:"전교회의 결과"},
   {id:"activity", label:"활동 기록"},
-  {id:"send", label:"선생님께 자료 보내기"},
+  {id:"exercise", label:"10월 기지개 체조"},
+  {id:"send", label:"✉ 선생님께 보내기"},
 ];
 const AG_ST = {proposed:"제안", adopted:"다음 회의 안건", done:"회의에서 다룸", held:"보류"};
 function councilView(){
@@ -703,15 +811,23 @@ function councilView(){
         h("div",{style:"display:flex;align-items:center;gap:14px;flex-wrap:wrap"},
           h("div",{class:"plate"}, h("b",{},"전교")), h("h1",{style:"font-size:26px"},"전교임원 화면")),
         h("div",{class:"names"}, SCHOOL_ROLES.map(([k,l])=>h("span",{},l," ",h("b",{},officerLabel(k))))),
-        state.councilUser ? h("div",{class:"whoami"}, h("b",{},officerLabel(state.councilUser)), ` (${roleName(state.councilUser)}) 로그인 중 `,
+        state.councilUser ? h("div",{class:"whoami"}, h("b",{},(state.officers.school||{})[state.councilUser] ? officerLabel(state.councilUser) : roleName(state.councilUser)), (state.officers.school||{})[state.councilUser] ? ` (${roleName(state.councilUser)}) 로그인 중 ` : " 로그인 중 ",
           h("button",{class:"linkbtn",onclick:councilLogout},"로그아웃")) : null
       ),
       roleBadge()
     ),
     statusBanner(),
+    state.councilUser && state.ctab!=="send" ? h("div",{class:"sendbar"},
+      h("div",{}, h("b",{},"선생님께 하고 싶은 말이 있나요?"), h("span",{},"글, 사진, 파일을 선생님께 바로 보낼 수 있어요.")),
+      h("button",{class:"btn",style:"--gc:var(--hl)",onclick:()=>{state.ctab="send";state.composing=false;state.editing=null;render();setTimeout(()=>document.getElementById("d_title")?.focus(),0);}},"✉ 선생님께 보내기")
+    ) : null,
+    state.teacher ? h("div",{class:"sendbar"},
+      h("div",{}, h("b",{},"선생님 모드로 보고 있어요"), h("span",{},"전교임원이 보낸 글과 자료는 교사 화면 ‘받은 자료’에서 확인하고 답장해요.")),
+      h("button",{class:"btn ghost",style:"--gc:var(--ink)",onclick:()=>{state.dtab="inbox";go("teacher");}},"받은 자료 보기")
+    ) : null,
     h("div",{class:"tabs",role:"tablist"},
       CTABS.map(t=>h("button",{class:"tab",role:"tab","aria-selected":String(state.ctab===t.id),
-        onclick:()=>{state.ctab=t.id;state.composing=false;state.confirmDel=null;state.agendaDraft=null;render();}},
+        onclick:()=>{state.ctab=t.id;state.composing=false;state.confirmDel=null;state.agendaDraft=null;state.editing=null;render();}},
         t.label, h("span",{class:"count"},counts[t.id]||"")))
     ),
     h("div",{role:"tabpanel"},
@@ -719,6 +835,7 @@ function councilView(){
       state.ctab==="allsug" ? allSuggestPane() :
       state.ctab==="school" ? schoolPane() :
       state.ctab==="activity" ? activityPane() :
+      state.ctab==="exercise" ? exerciseBoard() :
       state.ctab==="send" ? sendPane() : pledgePane())
   );
 }
@@ -886,11 +1003,24 @@ function lockView(c){
     }},
       h("label",{},"반 비밀번호", h("input",{type:"password",id:"upin",name:"upin",autocomplete:"off",required:true})),
       h("div",{class:"err"},state.lockErr),
-      h("button",{class:"btn",type:"submit",style:"--gc:var(--gc)"},"들어가기"))
+      h("button",{class:"btn",type:"submit",style:"--gc:var(--gc)"},"들어가기")),
+    state.teacherInline ? h("form",{class:"tinline",onsubmit:async e=>{e.preventDefault();
+      try{ const lr=await API.login("teacher", null, e.target.tpin.value); if (lr?.firstTime) toast("처음이라 이 비밀번호를 교사 비밀번호로 정했어요"); syncTeacher(); state.teacherInline=false; state.lockErr=""; await state.db.refresh(); render(); loadBackupMeta(); toast("선생님 모드로 들어왔어요"); }
+      catch(err){ state.lockErr = err.code==="wrong_password" ? "교사 비밀번호가 맞지 않아요." : (err.message||"로그인하지 못했어요."); render(); setTimeout(()=>document.getElementById("tpin")?.focus(),0); }
+    }},
+      h("label",{},"교사 비밀번호", h("input",{type:"password",id:"tpin",name:"tpin",autocomplete:"current-password",required:true})),
+      h("button",{class:"btn ghost",type:"submit",style:"--gc:var(--ink)"},"교사로 들어가기"))
+    : h("button",{class:"linkbtn",style:"justify-self:center",onclick:()=>{state.teacherInline=true;state.lockErr="";render();setTimeout(()=>document.getElementById("tpin")?.focus(),0);}},"선생님이신가요? 교사 비밀번호로 들어가기")
   );
 }
 function roleName(k){ return (SCHOOL_ROLES.find(r=>r[0]===k)||[,""])[1]; }
 function officerLabel(k){ const o=state.officers.school||{}; const nm=o[k]; if(!nm) return "미등록"; return o[k+"Class"] ? `${nm} (${o[k+"Class"]})` : nm; }
+function openCouncilAs(k){
+  if (state.teacher || state.councilUser===k){ go("council"); return; }
+  if (state.councilUser && state.councilUser!==k){ API.logout("council"); state.councilUser=null; }
+  state.loginPick=k; state.lockErr=""; go("council");
+  setTimeout(()=>document.getElementById("cpin")?.focus(),300);
+}
 function councilLogout(){ API.logout("council"); state.councilUser=null; go(null); state.db.refresh(); toast("로그아웃했어요"); }
 function councilLogin(){
   const pick=state.loginPick;
@@ -907,7 +1037,7 @@ function councilLogin(){
       try{ await API.login("council", pick, needPin ? e.target.cpin.value.trim() : ""); }
       catch(err){ state.lockErr = err.code==="wrong_password" ? "비밀번호가 맞지 않아요." : (err.message||"로그인하지 못했어요."); render(); setTimeout(()=>document.getElementById("cpin")?.focus(),0); return; }
       state.lockErr=""; state.councilUser=pick; state.loginPick=null; render(); state.db.refresh();
-      toast(`${officerLabel(pick)} 님, 반가워요`);
+      toast(`${(state.officers.school||{})[pick] || roleName(pick)} 님, 반가워요`);
     }},
       needPin ? h("label",{},`${roleName(pick)} 비밀번호`, h("input",{type:"password",id:"cpin",name:"cpin",autocomplete:"off",required:true}))
               : h("p",{class:"muted",style:"margin:0;font-size:13.5px"},"아직 비밀번호가 정해지지 않았어요. 선생님께 비밀번호를 정해 달라고 하세요."),
@@ -934,14 +1064,15 @@ async function savePin(kind, key, password){
 }
 
 /* ---------- 선생님께 자료 보내기 ---------- */
-const MAX_ATTACH = 8*1024*1024;      // 첨부파일 최대 8MB
-const MAX_IMAGE = 1200*1024;         // 사진은 1.2MB 안으로 줄여서 보내요
+const MAX_ATTACH = API.limits?.attach || 8*1024*1024;   // 첨부파일 최대 크기 (웹: 8MB)
+const MAX_IMAGE = API.limits?.image || 1200*1024;       // 사진은 이 크기 안으로 줄여서 보내요 (웹: 1.2MB)
+const fmtSize = n => n>=1024*1024 ? `${Math.round(n/1024/1024)}MB` : `${Math.round(n/1024)}KB`;
 const OK_EXT = ["png","jpg","jpeg","gif","webp","pdf","txt","hwp","hwpx","doc","docx","ppt","pptx","xls","xlsx","csv","zip"];
 function fileToDataURL(f){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(f); }); }
 async function shrinkImage(f){
   const url=await fileToDataURL(f);
   const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url; });
-  for (const [max,q] of [[2000,.82],[1600,.78],[1280,.72],[1024,.66],[800,.6]]){
+  for (const [max,q] of [[2000,.82],[1600,.78],[1280,.72],[1024,.66],[800,.6],[640,.55],[480,.5]]){
     const sc=Math.min(1, max/Math.max(img.width,img.height));
     const c=document.createElement("canvas"); c.width=Math.round(img.width*sc); c.height=Math.round(img.height*sc);
     c.getContext("2d").drawImage(img,0,0,c.width,c.height);
@@ -957,7 +1088,7 @@ async function pickAttach(f){
     if (f.type.startsWith("image/") && ext!=="gif") state.sendFile=await shrinkImage(f);
     else {
       if (!OK_EXT.includes(ext)){ toast("이 종류의 파일은 보낼 수 없어요 (사진, pdf, 한글, 워드, 엑셀, 파워포인트, zip)"); return; }
-      if (f.size>MAX_ATTACH){ toast("파일이 너무 커요. 8MB보다 작은 파일만 보낼 수 있어요."); return; }
+      if (f.size>MAX_ATTACH){ toast(`파일이 너무 커요. ${fmtSize(MAX_ATTACH)}보다 작은 파일만 보낼 수 있어요.`); return; }
       const data=await fileToDataURL(f);
       state.sendFile={name:f.name, type:f.type||"application/octet-stream", data};
     }
@@ -983,15 +1114,18 @@ function attachView(a, owner){
     a.id && (state.teacher || owner) ? h("button",{class:"btn small ghost",type:"button",onclick:()=>saveAttach(a)},"파일로 저장") : null);
 }
 async function saveAttach(a){
-  try{ await API.download(`/attach/${a.id}`, a.name); }
+  try{
+    if (a.data){ API.saveBlob(await (await fetch(a.data)).blob(), a.name); return; }
+    await API.download(`/attach/${a.id}`, a.name);
+  }
   catch(e){ toast("저장하지 못했어요. 다시 시도해 주세요."); }
 }
 function sendPane(){
   const me=state.councilUser;
   const list = me ? state.data.sends.filter(x=>x.from===me) : state.data.sends;
   return h("div",{},
-    h("div",{class:"pane-intro"}, h("p",{}, state.teacher ? "전교임원이 보낸 자료는 교사 화면 ‘받은 자료’에서 확인하고 답장할 수 있어요." : "회의 자료, 사진, 계획서 같은 것을 선생님께 바로 보내요. 보낸 자료는 아래에서 확인할 수 있어요.")),
-    me && state.db ? h("form",{class:"compose",onsubmit:e=>{e.preventDefault();
+    h("div",{class:"pane-intro"}, h("p",{}, state.teacher ? "전교임원이 보낸 자료는 교사 화면 ‘받은 자료’에서 확인하고 답장할 수 있어요." : "선생님께 하고 싶은 말, 회의 자료, 사진, 계획서를 바로 보내요. 내용만 적어서 보내도 되고, 파일은 넣지 않아도 돼요. 보낸 글은 아래에서 확인할 수 있어요.")),
+    me && state.db ? h("form",{class:"compose","data-key":"send",onsubmit:e=>{e.preventDefault();
       const f=e.target; const o=state.officers.school||{};
       save("send",{from:me, fromRole:roleName(me), fromName:o[me]||"", fromClass:o[me+"Class"]||"", title:f.d_title.value.trim(), body:f.d_body.value.trim(),
         link:f.d_link.value.trim(), attach:state.sendFile||null, status:"new", reply:"", classId:"council"}, ()=>{state.sendFile=null;}, "선생님께 보냈어요");
@@ -1000,7 +1134,7 @@ function sendPane(){
       h("label",{},"제목", h("input",{type:"text",id:"d_title",name:"d_title",required:true,maxlength:"80",placeholder:"예: 10월 전교회의 안건 정리"})),
       h("label",{},"내용", h("textarea",{id:"d_body",name:"d_body",required:true,placeholder:"선생님께 전할 내용을 적어 주세요."})),
       h("label",{},"링크 (선택)", h("input",{type:"text",id:"d_link",name:"d_link",maxlength:"300",placeholder:"예: 구글 드라이브나 패들렛 주소"})),
-      h("label",{},"파일 첨부 (선택 · 8MB까지 · 사진은 자동으로 줄여서 보내요)", h("input",{type:"file",id:"d_file",accept:"image/*,.pdf,.txt,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.zip",onchange:e=>pickAttach(e.target.files[0])})),
+      h("label",{},`파일 첨부 (선택 · ${fmtSize(MAX_ATTACH)}까지 · 사진은 자동으로 줄여서 보내요)`, h("input",{type:"file",id:"d_file",accept:"image/*,.pdf,.txt,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.zip",onchange:e=>pickAttach(e.target.files[0])})),
       state.sendFile ? h("div",{class:"bkrow"}, attachView(state.sendFile), h("button",{class:"btn small ghost",type:"button",onclick:()=>{state.sendFile=null;render();}},"첨부 빼기")) : null,
       h("div",{class:"actions"}, h("button",{type:"submit",class:"btn"},"선생님께 보내기"))
     ) : null,
@@ -1010,8 +1144,8 @@ function sendPane(){
 function sendCard(x){
   const st=x.status==="seen"?"seen":"new";
   return h("article",{class:"card"},
+    h("div",{class:"sender"}, h("span",{class:"srole"}, x.fromRole||roleName(x.from)), h("b",{}, x.fromName||"이름 미등록"), x.fromClass?h("span",{class:"muted"},`${x.fromClass}반`):null, h("span",{class:"muted"},`· ${fmtDate(x.createdAt)} 보냄`)),
     h("div",{class:"head"}, h("h3",{},x.title), h("span",{class:`pill n-${st}`}, st==="seen"?"선생님 확인함":"확인 전")),
-    h("span",{class:"info"}, `${x.fromRole||""} ${x.fromName||""}${x.fromClass?` (${x.fromClass})`:""} · ${fmtDate(x.createdAt)}`),
     h("p",{},x.body),
     x.link ? h("p",{style:"font-size:14px"}, "🔗 ", /^https?:\/\//.test(x.link) ? h("a",{href:x.link,target:"_blank",rel:"noopener"},x.link) : x.link) : null,
     attachView(x.attach, x.from===state.councilUser),
@@ -1112,7 +1246,19 @@ function backupPage(){
     ),
     h("section",{class:"bkbox"},
       h("h3",{},"교사 비밀번호"),
-      h("p",{class:"muted",style:"margin:0;font-size:13.5px"},"교사 비밀번호는 반·전교임원 비밀번호와 따로 관리돼요. 코드에는 들어 있지 않고, Cloudflare Pages 설정의 환경변수 ADMIN_PASSWORD에 저장돼요. 바꾸려면 그 값을 고친 뒤 다시 배포하세요. 바꾸면 모든 교사 로그인이 풀려요.")
+      API.canChangeTeacherPassword
+        ? [h("p",{class:"muted",style:"margin:0;font-size:13.5px"},"교사 비밀번호는 반·전교임원 비밀번호와 따로 관리돼요. 학생은 볼 수 없어요."),
+           h("form",{class:"bkrow",onsubmit:async e=>{e.preventDefault();
+             const a=e.target.np1.value, b=e.target.np2.value;
+             if (a.length<4) return toast("4자 이상으로 정해 주세요.");
+             if (a!==b) return toast("두 비밀번호가 달라요.");
+             try{ await API.req("PUT","/teacher-password",{password:a}); e.target.reset(); toast("교사 비밀번호를 바꿨어요"); }
+             catch(err){ toast(err.message||"바꾸지 못했어요. 다시 시도해 주세요."); }
+           }},
+             h("input",{type:"password",id:"np1",name:"np1",autocomplete:"new-password",placeholder:"새 비밀번호",style:"max-width:160px",required:true}),
+             h("input",{type:"password",id:"np2",name:"np2",autocomplete:"new-password",placeholder:"한 번 더",style:"max-width:160px",required:true}),
+             h("button",{class:"btn small",type:"submit",style:"--gc:var(--ink)"},"바꾸기"))]
+        : h("p",{class:"muted",style:"margin:0;font-size:13.5px"},"교사 비밀번호는 반·전교임원 비밀번호와 따로 관리돼요. 코드에는 들어 있지 않고, Cloudflare Pages 설정의 환경변수 ADMIN_PASSWORD에 저장돼요. 바꾸려면 그 값을 고친 뒤 다시 배포하세요. 바꾸면 모든 교사 로그인이 풀려요.")
     )
   );
 }
@@ -1135,6 +1281,40 @@ function calWeeks(){
   });
   return weeks;
 }
+/* 전교임원이 보는 10월 기지개 체조 결과 (보기만 해요) */
+function exerciseBoard(){
+  const weeks=calWeeks();
+  const wkLabel=w=>{ const ds=w.slots.filter(Boolean).map(x=>x.d); return `${CHALLENGE.month}/${ds[0]}~${ds[ds.length-1]}`; };
+  const t=new Date(), todayD=(t.getFullYear()===CHALLENGE.year && t.getMonth()+1===CHALLENGE.month)?t.getDate():(t>new Date(CHALLENGE.year,CHALLENGE.month,0)?99:0);
+  const started=w=>w.slots.some(x=>x && x.d<=todayD);
+  const ended=w=>{ const ds=w.slots.filter(Boolean).map(x=>x.d); return ds[ds.length-1]<todayD; };
+  const rows=ALL_CLASSES.map(c=>({c, ...exStats(c), days:new Set(state.exercise[c]||[])}));
+  const allOk=rows.filter(r=>weeks.filter(ended).every(w=>w.done(r.days)>=w.goal)).length;
+  return h("div",{},
+    h("div",{class:"pane-intro"}, h("p",{},`${CHALLENGE.desc} 각 반이 체크한 결과를 보여 줘요. 이 화면에서는 체크할 수 없어요. 체크는 각 반 페이지에서 해요.`)),
+    h("section",{class:"ex",style:"--gc:var(--ink)"},
+      h("div",{class:"ex-head"},
+        h("div",{}, h("h3",{},`${CHALLENGE.month}월 ${CHALLENGE.title} 반별 결과`), h("p",{},"주마다 2번 이상 하면 ‘달성’이에요. 휴일이 있는 주도 목표는 2번이에요.")),
+        h("div",{class:"ex-sum"},
+          h("div",{}, h("b",{},`${rows.reduce((n,r)=>n+r.count,0)}회`), h("span",{},"전체 반 합계")),
+          h("div",{}, h("b",{},`${allOk}/${rows.length}반`), h("span",{},"끝난 주 모두 달성"))
+        )
+      ),
+      h("div",{class:"tbl-wrap"}, h("table",{class:"atbl exb"},
+        h("thead",{}, h("tr",{}, h("th",{},"반"), weeks.map((w,i)=>h("th",{},`${i+1}주`, h("br"), h("span",{class:"wkd"},wkLabel(w)))), h("th",{},"합계"), h("th",{},"달성 주"))),
+        h("tbody",{}, rows.map(r=>h("tr",{class:`g${gradeOf(r.c)}`},
+          h("td",{}, h("span",{class:"cls",style:"color:var(--gc)"},r.c)),
+          weeks.map(w=>{ const n=w.done(r.days), ok=n>=w.goal, fut=!started(w), now=!fut&&!ended(w);
+            return h("td",{}, h("span",{class:"exc "+(fut?"fut":ok?"ok":now?"now":n?"part":"zero")}, fut?"–":`${n}회`, ok?h("small",{},"달성"):now?h("small",{},"이번 주"):null)); }),
+          h("td",{}, h("b",{},`${r.count}회`)),
+          h("td",{}, `${r.ok}/${r.total}`)
+        )))
+      )),
+      h("p",{class:"ex-note"},"초록 칸은 목표 달성, 노란 칸은 1번만 하고 끝난 주, 빨간 글씨는 한 번도 못 하고 끝난 주예요. ‘이번 주’는 아직 진행 중이고, ‘–’는 아직 오지 않은 주예요.")
+    )
+  );
+}
+
 function exerciseTable(id){
   const days=new Set(state.exercise[id]||[]);
   const weeks=calWeeks();
@@ -1194,7 +1374,8 @@ async function save(kind, body, after, msg){
   const btn=document.querySelector("form.compose button[type=submit]"); if(btn) btn.disabled=true;
   try{
     await state.db.collection(COLL[kind]).add({...body, createdAt:Date.now()});
-    state.composing=false; state.homeComposing=false; after&&after(); render(); toast(msg||"올렸어요");
+    document.querySelectorAll("form.compose[data-key]").forEach(f=>f.reset());
+    state.composing=false; state.homeComposing=false; state.noticeDraft=null; after&&after(); render(); toast(msg||"올렸어요");
   }catch(e){
     if(btn) btn.disabled=false;
     if (e?.code==="invalid_argument"){ toast(e.message||"쓸 권한이 없어요. 다시 로그인해 주세요."); }
