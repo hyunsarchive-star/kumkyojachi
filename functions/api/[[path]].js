@@ -15,8 +15,9 @@ const COUNCIL_ROLES = ["president", "vp6", "vp5"];
 const COLLECTIONS = [
   "notices", "schoolMeetings", "meetings", "activities", "suggestions", "agendas",
   "sends", "exercise", "officers", "schoolAttendance", "pledges",
+  "councilMsgs", "councilReplies", "ringApply", "ringScores", "ringSchedule",
 ];
-const TEACHER_ONLY = new Set(["notices", "schoolMeetings", "schoolAttendance", "officers", "pledges"]);
+const TEACHER_ONLY = new Set(["notices", "schoolMeetings", "schoolAttendance", "officers", "pledges", "councilMsgs", "ringSchedule"]);
 
 const ID_RE = /^[A-Za-z0-9_\-.~:@+]{1,200}$/;
 const MAX_DOC_BYTES = 300 * 1024;          // 글 하나 최대 크기 (첨부 제외)
@@ -192,6 +193,15 @@ async function getData(env, auth) {
     for (const [id, d] of Object.entries(out.sends)) if (auth.council && d.from === auth.council) mine[id] = d;
     out.sends = mine;
   }
+  // 선생님 ↔ 전교임원 메시지는 교사와 로그인한 전교임원만 볼 수 있어요.
+  if (!auth.teacher) {
+    const msgs = {}, reps = {};
+    if (auth.council) {
+      for (const [id, m] of Object.entries(out.councilMsgs)) if (m.to === "all" || m.to === auth.council) msgs[id] = m;
+      for (const [id, r] of Object.entries(out.councilReplies)) if (msgs[r.msgId]) reps[id] = r;
+    }
+    out.councilMsgs = msgs; out.councilReplies = reps;
+  }
   const pinStatus = { classes: {}, council: {} };
   for (const k of Object.keys(pins.classes)) pinStatus.classes[k] = true;
   for (const k of Object.keys(pins.council)) pinStatus.council[k] = true;
@@ -203,7 +213,7 @@ async function getData(env, auth) {
 function classOpen(pins, cid) { return ALL_CLASSES.includes(cid) && !pins.classes[cid]; }
 function classAllowed(auth, pins, cid) { return ALL_CLASSES.includes(cid) && (auth.classes.has(cid) || classOpen(pins, cid)); }
 
-function checkWrite(auth, pins, col, oldDoc, data) {
+function checkWrite(auth, pins, col, oldDoc, data, id) {
   if (auth.teacher) return data;
   if (TEACHER_ONLY.has(col)) throw new HttpError(403, "선생님만 쓸 수 있어요.");
   const deny = () => { throw new HttpError(403, "이 곳에 쓸 권한이 없어요. 다시 로그인해 주세요."); };
@@ -226,6 +236,19 @@ function checkWrite(auth, pins, col, oldDoc, data) {
     case "agendas":
       if (!auth.council) deny();
       return data;
+    case "ringApply":
+      // 고리던지기 대회 신청: 그 반만 자기 반을 신청·취소할 수 있어요 (문서 id = 반)
+      if (id !== data.classId || !classAllowed(auth, pins, data.classId)) deny();
+      return data;
+    case "ringScores":
+      // 경기 기록은 전교임원(심판)과 교사만 넣어요
+      if (!auth.council || id !== data.classId || !ALL_CLASSES.includes(data.classId)) deny();
+      return data;
+    case "councilReplies":
+      // 전교임원은 자기 답장만 쓰고 고칠 수 있어요 (문서 id = 메시지id_역할)
+      if (!auth.council || data.from !== auth.council || id !== `${data.msgId}_${auth.council}`) deny();
+      if (oldDoc && oldDoc.from !== auth.council) deny();
+      return { ...data, seen: false };
     case "sends":
       if (oldDoc || !auth.council || data.from !== auth.council) deny();
       return { ...data, status: "new", reply: "" };
@@ -281,7 +304,11 @@ async function putDoc(request, env, auth) {
   if (text.length > MAX_DOC_BYTES) throw new HttpError(413, "글이 너무 길어요.");
 
   const db0 = await loadDb(env);
-  const checked = checkWrite(auth, pins, col, db0.collections[col][id], data);
+  if (col === "councilReplies" && !auth.teacher) {
+    const msg = db0.collections.councilMsgs[String(data.msgId || "")];
+    if (!msg || (msg.to !== "all" && msg.to !== auth.council)) throw new HttpError(403, "답장할 수 없는 메시지예요.");
+  }
+  const checked = checkWrite(auth, pins, col, db0.collections[col][id], data, id);
   for (const im of imagesToStore) {
     await env.KV.put(K.att(im.attId), im.bytes, { metadata: { name: im.name, type: im.type, from: "", public: true, size: im.bytes.length } });
   }
@@ -294,7 +321,7 @@ async function putDoc(request, env, auth) {
   await mutateDb(env, db => {
     const old = db.collections[col][id];
     // 학생이 쓴 글을 다른 사람이 덮어쓰지 못하게 마지막 확인
-    checkWrite(auth, pins, col, old, data);
+    checkWrite(auth, pins, col, old, data, id);
     db.collections[col][id] = { ...checked, _w: stamp };
   });
   return json({ ok: true, w: stamp, attach: data.attach || null, doc: { ...checked, _w: stamp } });

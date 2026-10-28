@@ -10,13 +10,14 @@ const GRADES = [
 const MONTHS = [3,4,5,6,7,8,9,10,11,12,1,2];
 const TABS = [
   {id:"notice",   label:"선생님 안내",   who:"교사"},
+  {id:"ring",     label:"🎯 고리던지기 대항전", who:"학생"},
   {id:"school",   label:"전교회의 결과", who:"교사"},
   {id:"meeting",  label:"학급회의 결과", who:"학생"},
   {id:"activity", label:"월별 활동",     who:"학생"},
   {id:"suggest",  label:"건의사항",      who:"학생"},
   {id:"pledge",   label:"전교임원 공약", who:"교사"},
 ];
-const COLL = {notice:"notices", school:"schoolMeetings", meeting:"meetings", activity:"activities", suggest:"suggestions", agenda:"agendas", send:"sends"};
+const COLL = {notice:"notices", school:"schoolMeetings", meeting:"meetings", activity:"activities", suggest:"suggestions", agenda:"agendas", send:"sends", msg:"councilMsgs", reply:"councilReplies"};
 const CHALLENGE = {
   year:2026, month:10, key:"2026-10", title:"기지개 체조", goal:2,
   desc:"10월 전교회의 결정: 중간놀이 시간에 주 2번 이상 기지개 체조를 해요.",
@@ -34,7 +35,7 @@ const STATUS = {new:"접수", review:"검토 중", done:"답변 완료"};
 
 const state = {
   db:null, teacher:false, dbReady:false, dbFailed:false,
-  data:{notices:[], schoolMeetings:[], meetings:[], activities:[], suggestions:[], agendas:[], sends:[]},
+  data:{notices:[], schoolMeetings:[], meetings:[], activities:[], suggestions:[], agendas:[], sends:[], councilMsgs:[], councilReplies:[], ringApply:[], ringScores:[], ringSchedule:[]},
   ctab:"pledge", sFilter:"all", agendaDraft:null, editing:null,
   pins:{classes:{}, council:{}}, pinsLoaded:false, pinsExists:false, units:new Set(), councilUser:null, lockErr:"",
   backupMeta:null, fileMeta:null, restorePending:null, busy:"", sendFile:null, downloads:null,
@@ -133,6 +134,7 @@ function homeView(){
       roleBadge()
     ),
     scheduleBlock(true),
+    ringHomeBanner(),
     latestAll ? h("div",{class:"notice-strip"},
       h("span",{class:"tag"},"전체 안내"),
       h("p",{}, h("strong",{},latestAll.title), "  ", h("span",{class:"muted"},fmtDate(latestAll.createdAt)))
@@ -304,6 +306,7 @@ function paneFor(tab){
   if (tab==="meeting") return meetingPane();
   if (tab==="activity") return activityPane();
   if (tab==="pledge") return pledgePane();
+  if (tab==="ring") return ringPane();
   return suggestPane();
 }
 
@@ -593,10 +596,10 @@ function dashboard(){
     ),
     statusBanner(),
     h("div",{class:"tabs",role:"tablist",style:"--gc:var(--ink)"},
-      [["classes","반 현황"],["inbox",`받은 자료${state.data.sends.filter(x=>x.status!=="seen").length?" "+state.data.sends.filter(x=>x.status!=="seen").length:""}`],["attend","전교회의 출결"],["org","자치회 관리"],["pledge","전교임원 공약"],["backup","백업·설정"]].map(([k,l])=>
+      [["classes","반 현황"],["inbox",`받은 자료${state.data.sends.filter(x=>x.status!=="seen").length?" "+state.data.sends.filter(x=>x.status!=="seen").length:""}`],["msgs",`전교임원 메시지함${msgUnreadForTeacher()?" "+msgUnreadForTeacher():""}`],["attend","전교회의 출결"],["org","자치회 관리"],["pledge","전교임원 공약"],["ring","고리던지기 대항전"],["backup","백업·설정"]].map(([k,l])=>
         h("button",{class:"tab",role:"tab","aria-selected":String(state.dtab===k),onclick:()=>{state.dtab=k;state.homeComposing=false;state.editing=null;render();}},l))
     ),
-    state.dtab==="inbox" ? inboxPage() : state.dtab==="backup" ? backupPage() : state.dtab==="attend" ? attendPage() : state.dtab==="org" ? orgPage() : state.dtab==="pledge" ? pledgePane() : classesPage(pending, lastMeeting)
+    state.dtab==="inbox" ? inboxPage() : state.dtab==="msgs" ? msgPane() : state.dtab==="backup" ? backupPage() : state.dtab==="attend" ? attendPage() : state.dtab==="org" ? orgPage() : state.dtab==="pledge" ? pledgePane() : state.dtab==="ring" ? ringJudgePane() : classesPage(pending, lastMeeting)
   );
 }
 
@@ -785,11 +788,13 @@ async function saveOfficer(c, k, v){
 
 /* ---------- 전교임원 화면 ---------- */
 const CTABS = [
+  {id:"msgs", label:"📬 선생님 메시지"},
   {id:"pledge", label:"공약"},
   {id:"agenda", label:"전교회의 안건"},
   {id:"allsug", label:"전교 건의 모아보기"},
   {id:"school", label:"전교회의 결과"},
   {id:"activity", label:"활동 기록"},
+  {id:"ring", label:"🎯 고리던지기 대항전"},
   {id:"exercise", label:"10월 기지개 체조"},
   {id:"send", label:"✉ 선생님께 보내기"},
 ];
@@ -803,6 +808,7 @@ function councilView(){
     allsug:pending, school:state.data.schoolMeetings.length,
     activity:forClass(state.data.activities,"council").length,
     send:state.councilUser ? state.data.sends.filter(x=>x.from===state.councilUser).length : state.data.sends.length,
+    msgs:state.councilUser ? myUnanswered().length : state.data.councilMsgs.length,
   };
   return h("div",{style:"--gc:var(--ink);--gcs:var(--surface-2)"},
     state.teacher ? h("button",{class:"back",onclick:()=>go("teacher")},"← 교사 화면") : h("button",{class:"back",onclick:()=>go(null)},"← 첫 화면"),
@@ -817,6 +823,10 @@ function councilView(){
       roleBadge()
     ),
     statusBanner(),
+    state.councilUser && myUnanswered().length && state.ctab!=="msgs" ? h("div",{class:"sendbar",style:"border-color:var(--ink);background:var(--surface)"},
+      h("div",{}, h("b",{},`선생님이 보낸 메시지 ${myUnanswered().length}개에 아직 답하지 않았어요`), h("span",{},"메시지를 읽고 답장을 남겨 주세요.")),
+      h("button",{class:"btn",style:"--gc:var(--ink)",onclick:()=>{state.ctab="msgs";render();}},"📬 메시지 보기")
+    ) : null,
     state.councilUser && state.ctab!=="send" ? h("div",{class:"sendbar"},
       h("div",{}, h("b",{},"선생님께 하고 싶은 말이 있나요?"), h("span",{},"글, 사진, 파일을 선생님께 바로 보낼 수 있어요.")),
       h("button",{class:"btn",style:"--gc:var(--hl)",onclick:()=>{state.ctab="send";state.composing=false;state.editing=null;render();setTimeout(()=>document.getElementById("d_title")?.focus(),0);}},"✉ 선생님께 보내기")
@@ -831,10 +841,12 @@ function councilView(){
         t.label, h("span",{class:"count"},counts[t.id]||"")))
     ),
     h("div",{role:"tabpanel"},
+      state.ctab==="msgs" ? msgPane() :
       state.ctab==="agenda" ? agendaPane() :
       state.ctab==="allsug" ? allSuggestPane() :
       state.ctab==="school" ? schoolPane() :
       state.ctab==="activity" ? activityPane() :
+      state.ctab==="ring" ? ringJudgePane() :
       state.ctab==="exercise" ? exerciseBoard() :
       state.ctab==="send" ? sendPane() : pledgePane())
   );
@@ -1122,21 +1134,29 @@ async function saveAttach(a){
 }
 function sendPane(){
   const me=state.councilUser;
+  const preview = state.teacher && !me;           // 선생님은 학생이 보는 칸을 미리보기로 봐요
+  const as = preview ? (state.previewRole||"president") : me;
   const list = me ? state.data.sends.filter(x=>x.from===me) : state.data.sends;
   return h("div",{},
     h("div",{class:"pane-intro"}, h("p",{}, state.teacher ? "전교임원이 보낸 자료는 교사 화면 ‘받은 자료’에서 확인하고 답장할 수 있어요." : "선생님께 하고 싶은 말, 회의 자료, 사진, 계획서를 바로 보내요. 내용만 적어서 보내도 되고, 파일은 넣지 않아도 돼요. 보낸 글은 아래에서 확인할 수 있어요.")),
-    me && state.db ? h("form",{class:"compose","data-key":"send",onsubmit:e=>{e.preventDefault();
+    preview ? h("div",{class:"sendbar",style:"margin-bottom:10px"},
+      h("div",{}, h("b",{},"학생 화면 미리보기"), h("span",{},"전교임원이 로그인하면 아래 칸이 보이고, 쓴 글은 교사 화면 ‘받은 자료’로 와요. 미리보기에서는 보낼 수 없어요.")),
+      h("label",{style:"display:flex;gap:6px;align-items:center;font-size:13px"},"누구로 보기",
+        h("select",{id:"prev_role",style:"width:auto",onchange:e=>{state.previewRole=e.target.value;render();}},
+          SCHOOL_ROLES.map(([k,l])=>h("option",{value:k,selected:as===k},`${l} ${officerLabel(k)}`))))
+    ) : null,
+    (me || preview) && state.db ? h("form",{class:"compose","data-key":"send",onsubmit:e=>{e.preventDefault(); if (preview){ toast("미리보기에서는 보낼 수 없어요"); return; }
       const f=e.target; const o=state.officers.school||{};
       save("send",{from:me, fromRole:roleName(me), fromName:o[me]||"", fromClass:o[me+"Class"]||"", title:f.d_title.value.trim(), body:f.d_body.value.trim(),
         link:f.d_link.value.trim(), attach:state.sendFile||null, status:"new", reply:"", classId:"council"}, ()=>{state.sendFile=null;}, "선생님께 보냈어요");
     }},
-      h("div",{class:"info"}, `보내는 사람: ${roleName(me)} ${officerLabel(me)}`),
+      h("div",{class:"info"}, `보내는 사람: ${roleName(as)} ${officerLabel(as)}`),
       h("label",{},"제목", h("input",{type:"text",id:"d_title",name:"d_title",required:true,maxlength:"80",placeholder:"예: 10월 전교회의 안건 정리"})),
       h("label",{},"내용", h("textarea",{id:"d_body",name:"d_body",required:true,placeholder:"선생님께 전할 내용을 적어 주세요."})),
       h("label",{},"링크 (선택)", h("input",{type:"text",id:"d_link",name:"d_link",maxlength:"300",placeholder:"예: 구글 드라이브나 패들렛 주소"})),
       h("label",{},`파일 첨부 (선택 · ${fmtSize(MAX_ATTACH)}까지 · 사진은 자동으로 줄여서 보내요)`, h("input",{type:"file",id:"d_file",accept:"image/*,.pdf,.txt,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.zip",onchange:e=>pickAttach(e.target.files[0])})),
       state.sendFile ? h("div",{class:"bkrow"}, attachView(state.sendFile), h("button",{class:"btn small ghost",type:"button",onclick:()=>{state.sendFile=null;render();}},"첨부 빼기")) : null,
-      h("div",{class:"actions"}, h("button",{type:"submit",class:"btn"},"선생님께 보내기"))
+      h("div",{class:"actions"}, h("button",{type:"submit",class:"btn",disabled:preview||null}, preview?"선생님께 보내기 (미리보기)":"선생님께 보내기"))
     ) : null,
     list.length ? h("div",{class:"list"}, list.map(x=>sendCard(x))) : emptyState("보낸 자료가 없어요", me ? "위 칸을 채우고 ‘선생님께 보내기’를 눌러 보세요." : "전교임원이 자료를 보내면 여기에 보여요.")
   );
@@ -1159,6 +1179,88 @@ function sendCard(x){
       )) : null
   );
 }
+/* ---------- 선생님 → 전교임원 메시지함 ---------- */
+function msgTargets(m){ return m.to==="all" ? SCHOOL_ROLES.map(r=>r[0]) : [m.to]; }
+function repliesFor(m){ return state.data.councilReplies.filter(r=>r.msgId===m.id); }
+function myUnanswered(){
+  const me=state.councilUser; if (!me) return [];
+  return state.data.councilMsgs.filter(m=>msgTargets(m).includes(me) && !repliesFor(m).some(r=>r.from===me));
+}
+function msgUnreadForTeacher(){
+  const ids=new Set(state.data.councilMsgs.map(m=>m.id));
+  return state.data.councilReplies.filter(r=>!r.seen && ids.has(r.msgId)).length;
+}
+function msgPane(){
+  const me=state.councilUser, teacher=state.teacher;
+  let list=state.data.councilMsgs;
+  if (me && !teacher) list=list.filter(m=>msgTargets(m).includes(me));
+  const toLabel = to => to==="all" ? "전교임원 모두" : `${roleName(to)} ${officerLabel(to)}`;
+  return h("div",{},
+    h("div",{class:"pane-intro"},
+      h("p",{}, teacher ? "전교임원에게만 보이는 메시지예요. 받은 임원이 각자 답장을 남길 수 있어요." : "선생님이 전교임원에게 보낸 메시지예요. 읽고 답장을 남겨 주세요."),
+      teacher && !state.composing && !state.editing ? h("button",{class:"btn",style:"--gc:var(--ink)",onclick:()=>{state.composing=true;render();setTimeout(()=>document.getElementById("cm_title")?.focus(),0);}},"메시지 보내기") : null),
+    teacher && state.composing ? msgForm() : null,
+    list.length ? h("div",{class:"list"}, list.map(m=> isEditing("msg",m.id) ? msgForm(m) : msgCard(m, toLabel))) :
+      emptyState("아직 메시지가 없어요", teacher ? "‘메시지 보내기’를 눌러 전교임원에게 첫 메시지를 보내 보세요." : "선생님이 메시지를 보내면 여기에 보여요.")
+  );
+}
+function msgForm(m){
+  const v=m||{};
+  return h("form",{class:"compose",style:"--gc:var(--ink)","data-key":"msg-"+(m?m.id:"new"),onsubmit:e=>{e.preventDefault();
+    const f=e.target;
+    const body={title:f.cm_title.value.trim(), body:f.cm_body.value.trim(), to:f.cm_to.value, link:f.cm_link.value.trim(), needReply:f.cm_need.checked, classId:"council"};
+    if (m) saveEdit("msg", m.id, body, "메시지를 수정했어요");
+    else save("msg", body, null, "전교임원에게 보냈어요");
+  }},
+    m ? h("div",{class:"info",style:"font-weight:500;color:var(--ink)"},"메시지 수정 중") : null,
+    h("div",{class:"row"},
+      h("label",{},"받는 사람", h("select",{id:"cm_to",name:"cm_to"},
+        h("option",{value:"all",selected:(v.to||"all")==="all"},"전교임원 모두"),
+        SCHOOL_ROLES.map(([k,l])=>h("option",{value:k,selected:v.to===k},`${l} ${officerLabel(k)}`)))),
+      h("label",{class:"check",style:"align-self:end"}, h("input",{type:"checkbox",id:"cm_need",name:"cm_need",checked:v.needReply!==false}), "답장을 받을게요")
+    ),
+    h("label",{},"제목", h("input",{type:"text",id:"cm_title",name:"cm_title",required:true,maxlength:"80",value:v.title||"",placeholder:"예: 10월 28일 전교회의 준비 부탁해요"})),
+    h("label",{},"내용", h("textarea",{id:"cm_body",name:"cm_body",required:true,placeholder:"전교임원에게 전할 내용을 적어 주세요."}, v.body||"")),
+    h("label",{},"링크 (선택)", h("input",{type:"text",id:"cm_link",name:"cm_link",maxlength:"300",value:v.link||"",placeholder:"예: https://..."})),
+    h("div",{class:"actions"},
+      h("button",{type:"button",class:"btn ghost",onclick:()=>{ if(m){state.editing=null;render();} else closeCompose(); }},"취소"),
+      h("button",{type:"submit",class:"btn"}, m?"수정 저장":"보내기"))
+  );
+}
+function msgCard(m, toLabel){
+  const me=state.councilUser, teacher=state.teacher;
+  const reps=repliesFor(m), targets=msgTargets(m);
+  const mine=reps.find(r=>r.from===me);
+  const answered=targets.filter(t=>reps.some(r=>r.from===t)).length;
+  return h("article",{class:"card msgcard"},
+    h("div",{class:"head"},
+      h("span",{class:"sender"}, h("span",{class:"srole"},"선생님"), h("span",{class:"muted"},`→ ${toLabel(m.to)} · ${fmtDate(m.createdAt)}${editedNote(m)}`)),
+      m.needReply!==false ? h("span",{class:"pill "+(answered===targets.length?"s-done":"s-review")}, `답장 ${answered}/${targets.length}`) : h("span",{class:"pill all"},"알림")),
+    h("h3",{},m.title),
+    h("p",{},m.body),
+    m.link ? h("p",{style:"font-size:14px;margin:0"}, "🔗 ", /^https?:\/\//.test(m.link) ? h("a",{href:m.link,target:"_blank",rel:"noopener"},m.link) : m.link) : null,
+    reps.length ? h("div",{class:"replies"}, reps.slice().sort((a,b)=>a.createdAt-b.createdAt).map(r=>h("div",{class:"reply"+(r.from===me?" mine":"")},
+      h("b",{}, `${r.fromRole||roleName(r.from)} ${r.fromName||""}${r.fromClass?` (${r.fromClass})`:""}`, h("span",{class:"muted",style:"font-weight:400;margin-left:6px"}, fmtDate(r.updatedAt||r.createdAt))),
+      h("div",{style:"white-space:pre-wrap;overflow-wrap:anywhere"}, r.text),
+      teacher && !r.seen ? h("div",{style:"display:flex;gap:8px;align-items:center;margin-top:6px"}, h("span",{class:"pill s-new"},"새 답장"), h("button",{class:"btn small ghost",onclick:()=>updateDoc("reply",r.id,{seen:true},"확인했어요")},"확인했어요")) : null
+    ))) : (m.needReply!==false ? h("p",{class:"muted",style:"margin:0;font-size:13.5px"},"아직 답장이 없어요.") : null),
+    me && targets.includes(me) && m.needReply!==false ? h("form",{class:"replyform","data-key":"reply-"+m.id,onsubmit:async e=>{e.preventDefault();
+      const text=e.target["rp_"+m.id].value.trim(); if(!text) return;
+      const o=state.officers.school||{}, id=`${m.id}_${me}`;
+      const btn=e.target.querySelector("button[type=submit]"); btn.disabled=true;
+      try{
+        await state.db.collection("councilReplies").doc(id).set({msgId:m.id, from:me, fromRole:roleName(me), fromName:o[me]||"", fromClass:o[me+"Class"]||"",
+          text, createdAt:mine?.createdAt||Date.now(), updatedAt:Date.now(), seen:false, classId:"council"});
+        e.target.reset(); toast(mine?"답장을 고쳤어요":"선생님께 답장을 보냈어요");
+      }catch(err){ btn.disabled=false; toast(err?.message||"보내지 못했어요. 다시 시도해 주세요."); }
+    }},
+      h("label",{}, mine?"내 답장 고치기":"답장 쓰기", h("textarea",{id:"rp_"+m.id,required:true,style:"min-height:60px",placeholder:"선생님께 답장을 적어 주세요."}, mine?.text||"")),
+      h("div",{class:"actions"}, h("button",{type:"submit",class:"btn small",style:"--gc:var(--ink)"}, mine?"답장 고치기":"답장 보내기"))
+    ) : null,
+    teacher ? h("div",{class:"head"}, h("span",{}), h("span",{style:"display:flex;gap:6px;flex-wrap:wrap"}, editBtn("msg",m), delControls("msg",m))) : null
+  );
+}
+
 function inboxPage(){
   const list=state.data.sends;
   const unseen=list.filter(x=>x.status!=="seen");
@@ -1282,6 +1384,182 @@ function calWeeks(){
   return weeks;
 }
 /* 전교임원이 보는 10월 기지개 체조 결과 (보기만 해요) */
+/* ---------- 11월 전통놀이의 달 · 장대 고리던지기 대항전 ---------- */
+const RING = { title:"장대 고리던지기 대항전", month:"전통놀이의 달", place:"보도블럭", maxPlayers:10, rounds:3, secs:60,
+  days:["2026-11-09","2026-11-10","2026-11-11","2026-11-12","2026-11-13"], slots:["중간놀이 시간","점심시간"] };
+const RING_IMG = window.RING_IMG_SRC || "/img/ring-toss.png";
+function ringApplied(){ return state.data.ringApply.filter(a=>a.applied!==false); }
+function ringScoreOf(c){ return state.data.ringScores.find(s=>s.classId===c); }
+function ringSchedOf(c){ const r=state.data.ringSchedule.find(s=>s.classId===c); return r && r.date ? r : null; }
+function ringTotal(sc){ return sc ? (sc.rounds||[]).reduce((n,v)=>n+(Number(v)||0),0) : null; }
+function ringWhen(sd){ return sd ? `${planLabel({date:sd.date})} ${sd.slot||""}`.trim() : ""; }
+const byClass = (a,b)=>a.localeCompare(b,undefined,{numeric:true});
+function ringStanding(){
+  const rows = ringApplied().map(a=>{ const sc=ringScoreOf(a.classId); return {c:a.classId, apply:a, sc, sd:ringSchedOf(a.classId), total:ringTotal(sc)}; });
+  const played = rows.filter(r=>r.sc && (r.sc.rounds||[]).length===RING.rounds).sort((a,b)=>b.total-a.total || byClass(a.c,b.c));
+  let rank=0, prev=null; played.forEach((r,i)=>{ if (r.total!==prev){ rank=i+1; prev=r.total; } r.rank=rank; });
+  const waiting = rows.filter(r=>!played.includes(r)).sort((a,b)=>((a.sd?.date||"9")+(a.sd?.slot||"")).localeCompare((b.sd?.date||"9")+(b.sd?.slot||"")) || byClass(a.c,b.c));
+  return {played, waiting};
+}
+function ringHomeBanner(){
+  const t=new Date(); if (!(t.getFullYear()===2026 && (t.getMonth()+1===10 || t.getMonth()+1===11))) return null;
+  const {played, waiting} = ringStanding();
+  const top=played.slice(0,3);
+  return h("section",{class:"ringbanner"},
+    h("img",{src:RING_IMG,alt:"장대 고리던지기",class:"rb-img"}),
+    h("div",{style:"display:grid;gap:8px;min-width:0"},
+      h("div",{class:"rb-head"},
+        h("span",{class:"rb-tag"},`11월 ${RING.month}`),
+        h("b",{},RING.title)),
+      h("div",{class:"muted",style:"font-size:13.5px"}, `11월 9일(월) ~ 13일(금) · 장소: ${RING.place} · 신청 ${played.length+waiting.length}반 · 경기 끝 ${played.length}반`),
+      top.length ? h("ol",{class:"rb-top"}, top.map(r=>h("li",{}, h("span",{class:"medal m"+r.rank}, `${r.rank}위`), h("b",{},r.c), h("span",{},`${r.total}개`))))
+        : h("p",{class:"muted",style:"margin:0;font-size:13.5px"}, "4~6학년 학급 신청을 받고 있어요. 우리 반 페이지 → 🎯 고리던지기 대항전 탭에서 신청하면 선생님이 경기 날짜와 시간을 정해 알려 줘요."))
+  );
+}
+function ringSchedList(highlight){
+  const rows = ringApplied().map(a=>({c:a.classId, sd:ringSchedOf(a.classId)})).filter(r=>r.sd);
+  if (!rows.length) return null;
+  const byDay = {}; rows.forEach(r=>{ (byDay[r.sd.date] ||= []).push(r); });
+  return h("div",{class:"ringsched"}, RING.days.filter(d=>byDay[d]).map(d=>h("div",{class:"rs-day"},
+    h("b",{}, planLabel({date:d})),
+    byDay[d].sort((a,b)=>RING.slots.indexOf(a.sd.slot)-RING.slots.indexOf(b.sd.slot) || byClass(a.c,b.c)).map(r=>
+      h("div",{class:"rs-item g"+gradeOf(r.c)+(r.c===highlight?" mine":"")}, h("span",{class:"cls",style:"color:var(--gc)"},r.c), h("span",{}, r.sd.slot||""))))));
+}
+function ringBoard(highlight){
+  const {played, waiting} = ringStanding();
+  const best = {}; played.forEach(r=>{ const g=gradeOf(r.c); if (!best[g] || r.total>best[g]) best[g]=r.total; });
+  if (!played.length && !waiting.length) return emptyState("아직 신청한 학급이 없어요","4~6학년 학급이 신청하면 여기에 결과판이 생겨요.");
+  return h("div",{class:"tbl-wrap"}, h("table",{class:"atbl ringtbl"},
+    h("thead",{}, h("tr",{}, h("th",{},"순위"), h("th",{},"반"), h("th",{},"1판"), h("th",{},"2판"), h("th",{},"3판"), h("th",{},"합계"), h("th",{},"경기 일시"))),
+    h("tbody",{},
+      played.map(r=>h("tr",{class:`g${gradeOf(r.c)}`+(r.c===highlight?" mine":"")},
+        h("td",{}, h("span",{class:"medal m"+(r.rank<=3?r.rank:0)}, `${r.rank}위`)),
+        h("td",{}, h("span",{class:"cls",style:"color:var(--gc)"},r.c), best[gradeOf(r.c)]===r.total ? h("span",{class:"gbest"},`${gradeOf(r.c)}학년 1위`) : null),
+        (r.sc.rounds||[]).map(v=>h("td",{},`${v}개`)),
+        h("td",{}, h("b",{class:"rtotal"},`${r.total}개`)),
+        h("td",{}, r.sd ? ringWhen(r.sd) : (r.sc.date ? fmtYmd(r.sc.date) : "-")))),
+      waiting.map(r=>h("tr",{class:`g${gradeOf(r.c)} waiting`+(r.c===highlight?" mine":"")},
+        h("td",{},"–"), h("td",{}, h("span",{class:"cls",style:"color:var(--gc)"},r.c)),
+        h("td",{colspan:"4",class:"muted"}, r.sd ? "경기 전" : "일정 배정 전"), h("td",{}, r.sd ? ringWhen(r.sd) : "-")))
+    )
+  ));
+}
+function ringRules(){
+  return h("div",{class:"ringintro"},
+    h("img",{src:RING_IMG,alt:"장대 고리던지기 하는 모습",class:"ri-img"}),
+    h("div",{class:"ringrules"},
+      h("div",{}, h("b",{},`최대 ${RING.maxPlayers}명`), h("span",{},"한 판 참가 · 10명보다 적어도 돼요")),
+      h("div",{}, h("b",{},`1분 × ${RING.rounds}판`), h("span",{},"한 학생이 여러 판에 나와도 돼요")),
+      h("div",{}, h("b",{},"세 판 합산"), h("span",{},"장대에 건 고리 수를 모두 더해요")),
+      h("div",{}, h("b",{},RING.place), h("span",{},"경기 장소")),
+      h("div",{}, h("b",{},"11/9 ~ 11/13"), h("span",{},"선생님이 반별 일시를 배정해요")),
+      h("div",{}, h("b",{},"4~6학년"), h("span",{},"참여하고 싶은 학급 신청"))));
+}
+function ringPane(){
+  const id=state.classId, g=gradeOf(id);
+  const mine=state.data.ringApply.find(a=>a.classId===id);
+  const applied = mine && mine.applied!==false;
+  const sc=ringScoreOf(id), sd=ringSchedOf(id);
+  return h("div",{},
+    h("div",{class:"pane-intro"}, h("p",{}, `11월은 ${RING.month}! 참여하고 싶은 학급이 신청하면 선생님이 경기 날짜와 시간을 정해 알려 줘요. 결과는 모든 반에 공개돼요.`)),
+    ringRules(),
+    ![4,5,6].includes(g) ? null : h("section",{class:"card ringapply"},
+      h("div",{class:"head"}, h("h3",{},`${id}반 참여 신청`), h("span",{class:"pill "+(applied?"s-done":"all")}, applied?"신청 완료":"신청 전")),
+      applied
+        ? [sd ? h("div",{class:"ringnotice"}, h("span",{},"📅 경기 일정이 정해졌어요"), h("b",{}, ringWhen(sd)), h("span",{},`장소: ${RING.place}`))
+              : h("p",{class:"muted",style:"margin:0;font-size:14px"},`희망 시간: ${mine.slot||"상관없음"} · 선생님이 경기 날짜와 시간을 정하면 여기에 알려 드려요.`),
+           sc ? h("p",{style:"margin:0"}, h("b",{},`우리 반 기록 ${ringTotal(sc)}개`), ` (${(sc.rounds||[]).join(" + ")})`) : null,
+           !sc && !sd && writeAllowed("ring") ? h("div",{class:"actions",style:"justify-content:flex-start"},
+             h("button",{class:"btn small ghost",onclick:()=>ringApply(id,false)},"신청 취소")) : null]
+        : writeAllowed("ring") ? h("form",{class:"ringform","data-key":"ring-apply",onsubmit:e=>{e.preventDefault();
+            ringApply(id,true,{slot:e.target.r_slot.value});
+          }},
+            h("label",{style:"max-width:280px"},"희망 시간 (선생님이 참고해요)", h("select",{id:"r_slot",name:"r_slot"}, ["상관없음",...RING.slots].map(o=>h("option",{},o)))),
+            h("div",{class:"actions",style:"justify-content:flex-start"}, h("button",{class:"btn",type:"submit"},"우리 반 참여 신청")))
+        : h("p",{class:"muted",style:"margin:0"},"반 비밀번호로 들어오면 신청할 수 있어요.")
+    ),
+    ringSchedList(id) ? [h("h3",{class:"ringtitle"},"경기 일정"), ringSchedList(id)] : null,
+    h("h3",{class:"ringtitle"},"전체 결과판"),
+    ringBoard(id)
+  );
+}
+async function ringApply(id, on, extra={}){
+  const ref=state.db.collection("ringApply").doc(id);
+  const cur=state.data.ringApply.find(a=>a.classId===id);
+  try{
+    await ref.set({classId:id, applied:on, slot:extra.slot||cur?.slot||"", createdAt:cur?.createdAt||Date.now(), updatedAt:Date.now()});
+    toast(on?`${id}반 신청 완료! 일정이 정해지면 이 탭에서 알려 드려요`:"신청을 취소했어요");
+  }catch(e){ toast(e?.message||"저장하지 못했어요. 다시 시도해 주세요."); }
+}
+function ringJudgePane(){
+  const canJudge = state.teacher || !!state.councilUser;
+  const list = ringApplied().slice().sort((a,b)=>byClass(a.classId,b.classId));
+  return h("div",{},
+    h("div",{class:"pane-intro"}, h("p",{}, state.teacher ? "신청한 학급에 경기 날짜와 시간을 배정하면 그 반 페이지에 바로 알림이 떠요. 경기가 끝나면 판마다 넣은 고리 수를 적어요." : canJudge ? "경기가 끝나면 판마다 넣은 고리 수를 적고 저장해요. 모든 반 결과판에 바로 보여요." : "전교임원이 로그인하면 기록을 넣을 수 있어요.")),
+    ringRules(),
+    !list.length ? emptyState("아직 신청한 학급이 없어요","각 반 페이지 → 🎯 고리던지기 대항전 탭에서 신청할 수 있어요.") : null,
+    state.teacher && list.length ? [h("h3",{class:"ringtitle"},"경기 일정 배정 (11/9 ~ 11/13)"),
+      h("div",{class:"tbl-wrap"}, h("table",{class:"atbl ringjudge"},
+        h("thead",{}, h("tr",{}, h("th",{},"반"), h("th",{},"희망 시간"), h("th",{},"날짜"), h("th",{},"시간"), h("th",{},""))),
+        h("tbody",{}, list.map(a=>{ const c=a.classId, sd=ringSchedOf(c);
+          return h("tr",{class:`g${gradeOf(c)}`},
+            h("td",{}, h("span",{class:"cls",style:"color:var(--gc)"},c)),
+            h("td",{class:"muted"}, a.slot||"상관없음"),
+            h("td",{}, h("select",{id:`rs_${c}_d`,"aria-label":`${c} 경기 날짜`}, h("option",{value:""},"날짜 선택"), RING.days.map(d=>h("option",{value:d,selected:sd?.date===d},planLabel({date:d}))))),
+            h("td",{}, h("select",{id:`rs_${c}_s`,"aria-label":`${c} 경기 시간`}, RING.slots.map(o=>h("option",{value:o,selected:(sd?.slot||(a.slot!=="상관없음"?a.slot:""))===o},o)))),
+            h("td",{}, h("div",{class:"rowbtns"},
+              h("button",{class:"btn small",style:"--gc:var(--ink)",onclick:()=>ringAssign(c)}, sd?"일정 수정":"배정하기"),
+              sd ? h("button",{class:"btn small ghost",onclick:()=>ringUnassign(c)},"배정 취소") : null)));
+        }))
+      )),
+      ringSchedList()] : (list.length && ringSchedList() ? [h("h3",{class:"ringtitle"},"경기 일정"), ringSchedList()] : null),
+    canJudge && list.length ? [h("h3",{class:"ringtitle"},"경기 기록 입력"),
+      h("div",{class:"tbl-wrap"}, h("table",{class:"atbl ringjudge"},
+        h("thead",{}, h("tr",{}, h("th",{},"반"), h("th",{},"경기 일시"), h("th",{},"1판"), h("th",{},"2판"), h("th",{},"3판"), h("th",{},""))),
+        h("tbody",{}, list.slice().sort((a,b)=>((ringSchedOf(a.classId)?.date||"9")).localeCompare(ringSchedOf(b.classId)?.date||"9") || byClass(a.classId,b.classId)).map(a=>{ const c=a.classId, sc=ringScoreOf(c), r=sc?.rounds||[], sd=ringSchedOf(c);
+          const num=(i)=>h("input",{type:"number",id:`rj_${c}_${i}`,min:"0",max:"300",inputmode:"numeric",value:r[i]??"","aria-label":`${c} ${i+1}판`});
+          return h("tr",{class:`g${gradeOf(c)}`},
+            h("td",{}, h("span",{class:"cls",style:"color:var(--gc)"},c)),
+            h("td",{class:"muted"}, sd ? ringWhen(sd) : "배정 전"),
+            h("td",{},num(0)), h("td",{},num(1)), h("td",{},num(2)),
+            h("td",{}, h("div",{class:"rowbtns"},
+              h("button",{class:"btn small",style:"--gc:var(--ink)",onclick:()=>ringSave(c)}, sc?"수정":"저장"),
+              sc && state.teacher ? h("button",{class:"btn small ghost",onclick:()=>ringClear(c)},"지우기") : null)));
+        }))
+      ))] : null,
+    h("h3",{class:"ringtitle"},"전체 결과판"),
+    ringBoard()
+  );
+}
+async function ringAssign(c){
+  const date=document.getElementById(`rs_${c}_d`).value, slot=document.getElementById(`rs_${c}_s`).value;
+  if (!date){ toast("경기 날짜를 골라 주세요."); return; }
+  const cur=state.data.ringSchedule.find(s=>s.classId===c);
+  try{
+    await state.db.collection("ringSchedule").doc(c).set({classId:c, date, slot, createdAt:cur?.createdAt||Date.now(), updatedAt:Date.now()});
+    toast(`${c}반: ${planLabel({date})} ${slot}로 배정했어요. 반 페이지에 알림이 떠요`);
+  }catch(e){ toast(e?.message||"저장하지 못했어요."); }
+}
+async function ringUnassign(c){
+  const cur=state.data.ringSchedule.find(s=>s.classId===c); if (!cur) return;
+  try{ await state.db.collection("ringSchedule").doc(c).set({classId:c, date:"", slot:"", createdAt:cur.createdAt||Date.now(), updatedAt:Date.now()}); toast("배정을 취소했어요"); }
+  catch(e){ toast(e?.message||"저장하지 못했어요."); }
+}
+async function ringSave(c){
+  const vals=[0,1,2].map(i=>document.getElementById(`rj_${c}_${i}`).value.trim());
+  if (vals.some(v=>v==="" || !/^\d+$/.test(v) || Number(v)>300)){ toast("세 판 모두 0~300 사이 숫자로 적어 주세요."); return; }
+  const cur=ringScoreOf(c);
+  try{
+    await state.db.collection("ringScores").doc(c).set({classId:c, rounds:vals.map(Number), date:ringSchedOf(c)?.date||todayYmd(),
+      judge:state.councilUser?roleName(state.councilUser):"선생님", createdAt:cur?.createdAt||Date.now(), updatedAt:Date.now()});
+    toast(`${c}반 기록 ${vals.reduce((n,v)=>n+Number(v),0)}개 저장했어요`);
+  }catch(e){ toast(e?.message||"저장하지 못했어요. 다시 시도해 주세요."); }
+}
+async function ringClear(c){
+  try{ await state.db.collection("ringScores").doc(c).delete(); toast("기록을 지웠어요"); }
+  catch(e){ toast(e?.message||"지우지 못했어요."); }
+}
+
 function exerciseBoard(){
   const weeks=calWeeks();
   const wkLabel=w=>{ const ds=w.slots.filter(Boolean).map(x=>x.d); return `${CHALLENGE.month}/${ds[0]}~${ds[ds.length-1]}`; };
