@@ -280,6 +280,29 @@ details.att summary{cursor:pointer;font-size:14px;font-weight:500;color:var(--in
 .rs-item{display:flex;gap:8px;align-items:baseline;font-size:13px;padding:2px 6px;border-radius:5px}
 .rs-item.mine{background:var(--gcs);font-weight:700}
 .ringjudge select{width:auto;padding:4px 6px;font-size:13px}
+.excmp{display:grid;gap:10px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 14px}
+.excmp-top{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
+.excmp-top p{margin:0;flex-basis:100%;font-size:13.5px;color:var(--muted)}
+.cmpbox{display:grid;font-variant-numeric:tabular-nums}
+.cmpbox span{font-size:12px;color:var(--muted)}
+.cmpbox b{font-family:var(--f-display);font-weight:400;font-size:24px;line-height:1.1;color:var(--muted)}
+.cmpbox.now b{color:var(--gc)}
+.excmp .arrow{color:var(--muted);font-size:18px}
+.cmpdelta{font-size:15px;padding:2px 10px;border-radius:999px;font-variant-numeric:tabular-nums}
+.up{color:var(--ok)} .down{color:var(--danger)} .same{color:var(--muted)}
+.ex-sum b.up{color:var(--ok)} .ex-sum b.down{color:var(--danger)} .ex-sum b.same{color:var(--muted)}
+.cmpdelta.up{background:var(--g4-soft)} .cmpdelta.down{background:var(--hl-soft)} .cmpdelta.same{background:var(--surface-2)}
+.wkbars{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.wkbar{display:grid;justify-items:center;gap:2px;font-size:12px;font-variant-numeric:tabular-nums}
+.wkbar .bars{display:flex;gap:3px;align-items:flex-end;height:56px;width:100%;justify-content:center;border-bottom:1px solid var(--line)}
+.wkbar .bars i{display:block;width:14px;border-radius:3px 3px 0 0;min-height:2px}
+.wkbar small{color:var(--muted);font-size:11px}
+i.p{background:var(--line)} i.c{background:var(--gc)}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--muted)}
+.legend span{display:flex;gap:5px;align-items:center}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px}
+.cmp{display:inline-grid;justify-items:center;line-height:1.25}
+.cmp small{font-size:11px;color:var(--muted)}
 .school-sec{margin-top:36px;padding-top:20px;border-top:2px solid var(--line)}
 .notice-strip{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;margin-bottom:28px;display:flex;gap:14px;align-items:flex-start}
 .notice-strip .tag{flex:none;font-family:var(--f-display);font-size:15px;background:var(--ink);color:var(--ink-fg);padding:2px 10px;border-radius:6px}

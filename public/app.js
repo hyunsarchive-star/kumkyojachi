@@ -18,11 +18,17 @@ const TABS = [
   {id:"pledge",   label:"전교임원 공약", who:"교사"},
 ];
 const COLL = {notice:"notices", school:"schoolMeetings", meeting:"meetings", activity:"activities", suggest:"suggestions", agenda:"agendas", send:"sends", msg:"councilMsgs", reply:"councilReplies"};
-const CHALLENGE = {
-  year:2026, month:10, key:"2026-10", title:"기지개 체조", goal:2,
-  desc:"10월 전교회의 결정: 중간놀이 시간에 주 2번 이상 기지개 체조를 해요.",
-  holidays:{5:"개천절 대체휴일", 9:"한글날"},
+/* 기지개 체조 체크표: 달마다 하나씩 (다음 달을 이어서 하려면 여기에 한 줄 추가) */
+const CHALLENGES = {
+  10:{year:2026, month:10, key:"2026-10", title:"기지개 체조", goal:2,
+      desc:"10월 전교회의 결정: 중간놀이 시간에 주 2번 이상 기지개 체조를 해요.",
+      holidays:{5:"개천절 대체휴일", 9:"한글날"}, holidayNote:"주말과 휴일(5일 개천절 대체휴일, 9일 한글날)은 빠져 있어요."},
+  11:{year:2026, month:11, key:"2026-11", title:"기지개 체조", goal:2, prev:10,
+      desc:"11월에도 이어서 해요: 중간놀이 시간에 주 2번 이상 기지개 체조!",
+      holidays:{}, holidayNote:"주말은 빠져 있어요."},
 };
+function curChallenge(){ const t=new Date(); return (t.getFullYear()===2026 && CHALLENGES[t.getMonth()+1]) || CHALLENGES[t<new Date(2026,9,1)?10:11]; }
+function exDays(id, ch){ return new Set(((state.exercise[ch.key])||{})[id]||[]); }
 const ROLES = [["president","회장"],["vpBoy","남자 부회장"],["vpGirl","여자 부회장"]];
 const ALL_CLASSES = GRADES.flatMap(({g,classes})=>Array.from({length:classes},(_,i)=>`${g}-${i+1}`));
 const MEETING_PLAN = [
@@ -140,8 +146,8 @@ function homeView(){
       h("p",{}, h("strong",{},latestAll.title), "  ", h("span",{class:"muted"},fmtDate(latestAll.createdAt)))
     ) : null,
     isChallengeMonth() ? h("div",{class:"promise"},
-      h("span",{class:"tag"},"10월 우리 학교 약속"),
-      h("p",{},"중간놀이 시간에 ", h("strong",{},"주 2번 이상 기지개 체조"), "! 반 페이지 → 월별 활동 → 10월에서 한 날을 체크해요.")
+      h("span",{class:"tag"},`${curChallenge().month}월 우리 학교 약속`),
+      h("p",{},"중간놀이 시간에 ", h("strong",{},"주 2번 이상 기지개 체조"), `! 반 페이지 → 월별 활동 → ${curChallenge().month}월에서 한 날을 체크해요.`)
     ) : null,
     statusBanner(),
     h("section",{class:"floor council-floor"},
@@ -460,7 +466,7 @@ function activityPane(){
         return h("button",{class:"mbtn","aria-pressed":String(state.month===m),onclick:()=>{state.month=m;render();}}, `${m}월`, n?h("span",{class:"n"},n):null);
       })
     ),
-    state.month===CHALLENGE.month && id!=="council" ? exerciseTable(id) : null,
+    CHALLENGES[state.month] && id!=="council" ? exerciseTable(id, CHALLENGES[state.month]) : null,
     state.composing && writeAllowed("activity") ? h("form",{class:"compose",onsubmit:e=>{e.preventDefault();
       const f=e.target; const m=Number(f.a_month.value);
       save("activity",{month:m, title:f.a_title.value.trim(), body:f.a_body.value.trim(), author:f.a_author.value.trim(), classId:id}, ()=>{state.month=m;});
@@ -477,7 +483,7 @@ function activityPane(){
       h("div",{class:"head"}, h("h3",{},a.title), h("span",{class:"info"},`${a.month}월 활동`)),
       h("p",{},a.body),
       h("div",{class:"head"}, h("span",{class:"info"},`${a.author||"-"} · ${fmtDate(a.createdAt)}`), delControls("activity",a))
-    ))) : (state.month===CHALLENGE.month ? emptyState("체조 말고 다른 10월 활동 기록은 아직 없어요", "다른 활동을 했다면 ‘활동 기록하기’로 남겨 주세요.") : emptyState(`${state.month}월 활동 기록이 없어요`, "활동을 마쳤다면 ‘활동 기록하기’로 남겨 주세요."))
+    ))) : (CHALLENGES[state.month] ? emptyState(`체조 말고 다른 ${state.month}월 활동 기록은 아직 없어요`, "다른 활동을 했다면 ‘활동 기록하기’로 남겨 주세요.") : emptyState(`${state.month}월 활동 기록이 없어요`, "활동을 마쳤다면 ‘활동 기록하기’로 남겨 주세요."))
   );
 }
 
@@ -575,9 +581,9 @@ function teacherView(){
     ));
 }
 
-function exStats(id){
-  const days=new Set(state.exercise[id]||[]);
-  const weeks=calWeeks();
+function exStats(id, ch=curChallenge()){
+  const days=exDays(id, ch);
+  const weeks=calWeeks(ch);
   let ok=0; weeks.forEach(w=>{ if (w.done(days)>=w.goal) ok++; });
   return {count:days.size, ok, total:weeks.length};
 }
@@ -616,7 +622,7 @@ function classesPage(pending, lastMeeting){
             h("dt",{},"부회장 (남)"), h("dd",{}, state.officers[id]?.vpBoy || h("span",{class:"muted"},"미등록")),
             h("dt",{},"부회장 (여)"), h("dd",{}, state.officers[id]?.vpGirl || h("span",{class:"muted"},"미등록")),
             h("dt",{},"미답변 건의"), h("dd",{class:open?"alert":""},`${open}건`),
-            h("dt",{},"10월 체조"), h("dd",{class:ex.ok===ex.total?"good":""},`${ex.count}회 · ${ex.ok}/${ex.total}주 달성`),
+            h("dt",{},`${curChallenge().month}월 체조`), h("dd",{class:ex.ok===ex.total?"good":""},`${ex.count}회 · ${ex.ok}/${ex.total}주 달성`),
             h("dt",{},"최근 학급회의"), h("dd",{},lastMeeting(id))
           ));
       }))
@@ -795,7 +801,7 @@ const CTABS = [
   {id:"school", label:"전교회의 결과"},
   {id:"activity", label:"활동 기록"},
   {id:"ring", label:"🎯 고리던지기 대항전"},
-  {id:"exercise", label:"10월 기지개 체조"},
+  {id:"exercise", label:"기지개 체조"},
   {id:"send", label:"✉ 선생님께 보내기"},
 ];
 const AG_ST = {proposed:"제안", adopted:"다음 회의 안건", done:"회의에서 다룸", held:"보류"};
@@ -1366,9 +1372,11 @@ function backupPage(){
 }
 
 /* ---------- 기지개 체조 ---------- */
-function isChallengeMonth(){ const t=new Date(); return t.getFullYear()===CHALLENGE.year && t.getMonth()+1===CHALLENGE.month; }
-function calWeeks(){
-  const {year,month,holidays,goal}=CHALLENGE, last=new Date(year,month,0).getDate();
+function isChallengeMonth(){ const t=new Date(); return t.getFullYear()===2026 && !!CHALLENGES[t.getMonth()+1]; }
+/* 오늘이 그 달의 며칠째인지 (지난달이면 99, 아직 안 온 달이면 0) */
+function chToday(ch){ const t=new Date(); if (t.getFullYear()===ch.year && t.getMonth()+1===ch.month) return t.getDate(); return t>new Date(ch.year,ch.month,0) ? 99 : 0; }
+function calWeeks(ch=curChallenge()){
+  const {year,month,holidays,goal}=ch, last=new Date(year,month,0).getDate();
   const weeks=[]; let cur=null;
   for (let d=1; d<=last; d++){
     const dow=new Date(year,month-1,d).getDay(); // 0 일 ~ 6 토
@@ -1561,54 +1569,69 @@ async function ringClear(c){
 }
 
 function exerciseBoard(){
-  const weeks=calWeeks();
-  const wkLabel=w=>{ const ds=w.slots.filter(Boolean).map(x=>x.d); return `${CHALLENGE.month}/${ds[0]}~${ds[ds.length-1]}`; };
-  const t=new Date(), todayD=(t.getFullYear()===CHALLENGE.year && t.getMonth()+1===CHALLENGE.month)?t.getDate():(t>new Date(CHALLENGE.year,CHALLENGE.month,0)?99:0);
+  const months=Object.keys(CHALLENGES).map(Number);
+  const ch=CHALLENGES[state.exBoardMonth] || curChallenge();
+  const prev=ch.prev ? CHALLENGES[ch.prev] : null;
+  const weeks=calWeeks(ch);
+  const wkLabel=w=>{ const ds=w.slots.filter(Boolean).map(x=>x.d); return `${ch.month}/${ds[0]}~${ds[ds.length-1]}`; };
+  const todayD=chToday(ch);
   const started=w=>w.slots.some(x=>x && x.d<=todayD);
   const ended=w=>{ const ds=w.slots.filter(Boolean).map(x=>x.d); return ds[ds.length-1]<todayD; };
-  const rows=ALL_CLASSES.map(c=>({c, ...exStats(c), days:new Set(state.exercise[c]||[])}));
+  const upTo = todayD>=99 ? 31 : todayD;   // 같은 날짜까지 비교
+  const rows=ALL_CLASSES.map(c=>{ const days=exDays(c,ch); const r={c, ...exStats(c,ch), days};
+    if (prev){ const pd=exDays(c,prev); r.prevSame=[...pd].filter(d=>d<=upTo).length; r.prevAll=pd.size; r.nowSame=[...days].filter(d=>d<=upTo).length; }
+    return r; });
   const allOk=rows.filter(r=>weeks.filter(ended).every(w=>w.done(r.days)>=w.goal)).length;
+  const sumNow=rows.reduce((n,r)=>n+r.count,0), sumPrevSame=prev?rows.reduce((n,r)=>n+r.prevSame,0):0;
   return h("div",{},
-    h("div",{class:"pane-intro"}, h("p",{},`${CHALLENGE.desc} 각 반이 체크한 결과를 보여 줘요. 이 화면에서는 체크할 수 없어요. 체크는 각 반 페이지에서 해요.`)),
+    h("div",{class:"pane-intro"}, h("p",{},`${ch.desc} 각 반이 체크한 결과를 보여 줘요. 이 화면에서는 체크할 수 없어요. 체크는 각 반 페이지에서 해요.`)),
+    h("div",{class:"months",role:"group","aria-label":"월 선택"}, months.map(m=>h("button",{class:"mbtn","aria-pressed":String(ch.month===m),onclick:()=>{state.exBoardMonth=m;render();}},`${m}월`))),
     h("section",{class:"ex",style:"--gc:var(--ink)"},
       h("div",{class:"ex-head"},
-        h("div",{}, h("h3",{},`${CHALLENGE.month}월 ${CHALLENGE.title} 반별 결과`), h("p",{},"주마다 2번 이상 하면 ‘달성’이에요. 휴일이 있는 주도 목표는 2번이에요.")),
+        h("div",{}, h("h3",{},`${ch.month}월 ${ch.title} 반별 결과`), h("p",{},"주마다 2번 이상 하면 ‘달성’이에요. 휴일이 있는 주도 목표는 2번이에요.")),
         h("div",{class:"ex-sum"},
-          h("div",{}, h("b",{},`${rows.reduce((n,r)=>n+r.count,0)}회`), h("span",{},"전체 반 합계")),
+          h("div",{}, h("b",{},`${sumNow}회`), h("span",{},"전체 반 합계")),
+          prev ? h("div",{}, h("b",{class:deltaCls(sumNow-sumPrevSame)},deltaTxt(sumNow-sumPrevSame)), h("span",{},`${prev.month}월 같은 기간 대비`)) : null,
           h("div",{}, h("b",{},`${allOk}/${rows.length}반`), h("span",{},"끝난 주 모두 달성"))
         )
       ),
       h("div",{class:"tbl-wrap"}, h("table",{class:"atbl exb"},
-        h("thead",{}, h("tr",{}, h("th",{},"반"), weeks.map((w,i)=>h("th",{},`${i+1}주`, h("br"), h("span",{class:"wkd"},wkLabel(w)))), h("th",{},"합계"), h("th",{},"달성 주"))),
+        h("thead",{}, h("tr",{}, h("th",{},"반"), weeks.map((w,i)=>h("th",{},`${i+1}주`, h("br"), h("span",{class:"wkd"},wkLabel(w)))), h("th",{},"합계"), h("th",{},"달성 주"),
+          prev ? h("th",{},`${prev.month}월 대비`, h("br"), h("span",{class:"wkd"}, todayD>=99?"한 달 전체":`1~${upTo}일 비교`)) : null)),
         h("tbody",{}, rows.map(r=>h("tr",{class:`g${gradeOf(r.c)}`},
           h("td",{}, h("span",{class:"cls",style:"color:var(--gc)"},r.c)),
           weeks.map(w=>{ const n=w.done(r.days), ok=n>=w.goal, fut=!started(w), now=!fut&&!ended(w);
             return h("td",{}, h("span",{class:"exc "+(fut?"fut":ok?"ok":now?"now":n?"part":"zero")}, fut?"–":`${n}회`, ok?h("small",{},"달성"):now?h("small",{},"이번 주"):null)); }),
           h("td",{}, h("b",{},`${r.count}회`)),
-          h("td",{}, `${r.ok}/${r.total}`)
+          h("td",{}, `${r.ok}/${r.total}`),
+          prev ? h("td",{}, h("span",{class:"cmp"}, h("b",{class:deltaCls(r.nowSame-r.prevSame)}, deltaTxt(r.nowSame-r.prevSame)), h("small",{},`${r.prevSame}회 → ${r.nowSame}회`))) : null
         )))
       )),
-      h("p",{class:"ex-note"},"초록 칸은 목표 달성, 노란 칸은 1번만 하고 끝난 주, 빨간 글씨는 한 번도 못 하고 끝난 주예요. ‘이번 주’는 아직 진행 중이고, ‘–’는 아직 오지 않은 주예요.")
+      h("p",{class:"ex-note"},"초록 칸은 목표 달성, 노란 칸은 1번만 하고 끝난 주, 빨간 글씨는 한 번도 못 하고 끝난 주예요. ‘이번 주’는 아직 진행 중이고, ‘–’는 아직 오지 않은 주예요.",
+        prev ? ` ‘${prev.month}월 대비’는 두 달을 같은 날짜까지(예: 1~${upTo===31?"말":upTo}일) 놓고 비교해요.` : "")
     )
   );
 }
+function deltaTxt(d){ return d>0 ? `▲ ${d}회` : d<0 ? `▼ ${-d}회` : "같아요"; }
+function deltaCls(d){ return d>0 ? "up" : d<0 ? "down" : "same"; }
 
-function exerciseTable(id){
-  const days=new Set(state.exercise[id]||[]);
-  const weeks=calWeeks();
-  const t=new Date(), todayD = (t.getFullYear()===CHALLENGE.year && t.getMonth()+1===CHALLENGE.month) ? t.getDate() : null;
-  const beforeMonth = t < new Date(CHALLENGE.year, CHALLENGE.month-1, 1);
+function exerciseTable(id, ch=curChallenge()){
+  const days=exDays(id, ch);
+  const weeks=calWeeks(ch);
+  const t=new Date(), todayD = (t.getFullYear()===ch.year && t.getMonth()+1===ch.month) ? t.getDate() : null;
+  const beforeMonth = t < new Date(ch.year, ch.month-1, 1);
   const canEdit = !!state.db && !state.readOnly;
   const okWeeks = weeks.filter(w=>w.done(days)>=w.goal).length;
   const isFuture = d => beforeMonth || (todayD!==null && d>todayD);
-  return h("section",{class:"ex","aria-label":"10월 기지개 체조 체크표"},
+  return h("section",{class:"ex","aria-label":`${ch.month}월 기지개 체조 체크표`},
     h("div",{class:"ex-head"},
-      h("div",{}, h("h3",{},`${CHALLENGE.month}월 ${CHALLENGE.title} 체크표`), h("p",{},CHALLENGE.desc)),
+      h("div",{}, h("h3",{},`${ch.month}월 ${ch.title} 체크표`), h("p",{},ch.desc)),
       h("div",{class:"ex-sum"},
         h("div",{}, h("b",{},`${days.size}회`), h("span",{},"이번 달 한 횟수")),
         h("div",{}, h("b",{},`${okWeeks}/${weeks.length}주`), h("span",{},"주 2회 달성"))
       )
     ),
+    ch.prev ? exCompare(id, ch) : null,
     h("div",{class:"cal-wrap"}, h("table",{class:"cal"},
       h("thead",{}, h("tr",{}, ["월","화","수","목","금"].map(x=>h("th",{scope:"col"},x)), h("th",{scope:"col",class:"wk"},"이번 주"))),
       h("tbody",{}, weeks.map(w=>{
@@ -1621,25 +1644,56 @@ function exerciseTable(id){
             return h("td",{}, h("button",{class:"day"+(sl.d===todayD?" today":""),"aria-pressed":String(on),
               disabled: !canEdit || fut || state.exSaving,
               title: fut ? "아직 오지 않은 날이에요" : "",
-              "aria-label":`${CHALLENGE.month}월 ${sl.d}일 ${on?"체조 함, 누르면 취소":"누르면 체조 한 날로 체크"}`,
-              onclick:()=>toggleDay(id, sl.d)},
+              "aria-label":`${ch.month}월 ${sl.d}일 ${on?"체조 함, 누르면 취소":"누르면 체조 한 날로 체크"}`,
+              onclick:()=>toggleDay(id, sl.d, ch)},
               h("span",{class:"d"},sl.d), h("span",{class:"mk"}, on?"✓ 했어요":(sl.d===todayD?"오늘":""))));
           }),
           h("td",{}, h("div",{class:"wkcell"+(ok?" ok":"")}, h("b",{},`${n}회`), ok?"달성":`목표 ${w.goal}회`))
         );
       }))
     )),
-    h("p",{class:"ex-note"}, "날짜를 누르면 체크되고, 한 번 더 누르면 취소돼요. 주말과 휴일(5일 개천절 대체휴일, 9일 한글날)은 빠져 있어요.", state.teacher?"":" 아직 오지 않은 날은 체크할 수 없어요.")
+    h("p",{class:"ex-note"}, `날짜를 누르면 체크되고, 한 번 더 누르면 취소돼요. ${ch.holidayNote}`, state.teacher?"":" 아직 오지 않은 날은 체크할 수 없어요.")
   );
 }
-async function toggleDay(id, d){
+/* 지난달과 비교: 같은 날짜까지 한 횟수 + 주별 막대 */
+function exCompare(id, ch){
+  const prev=CHALLENGES[ch.prev];
+  const now=exDays(id, ch), pd=exDays(id, prev);
+  const todayD=chToday(ch);
+  const upTo = todayD>=99 ? 31 : todayD;
+  const nowSame=[...now].filter(d=>d<=upTo).length, prevSame=[...pd].filter(d=>d<=upTo).length;
+  const d=nowSame-prevSame;
+  const wNow=calWeeks(ch).map(w=>w.slots.some(x=>x && x.d<=todayD) ? w.done(now) : null), wPrev=calWeeks(prev).map(w=>w.done(pd));
+  const n=Math.max(wNow.length, wPrev.length), max=Math.max(2, ...wNow, ...wPrev);
+  const msg = todayD===0 ? `${ch.month}월이 시작되면 ${prev.month}월과 비교해서 보여 줘요. ${prev.month}월에는 모두 ${pd.size}회 했어요.`
+    : d>0 ? `${prev.month}월 같은 기간보다 ${d}회 더 했어요! 잘하고 있어요.`
+    : d<0 ? `${prev.month}월 같은 기간보다 ${-d}회 적어요. 이번 주에 조금 더 힘내요!`
+    : `${prev.month}월 같은 기간과 똑같이 했어요.`;
+  return h("div",{class:"excmp"},
+    h("div",{class:"excmp-top"},
+      h("div",{class:"cmpbox"}, h("span",{},`${prev.month}월`, todayD>0&&todayD<99?` 1~${upTo}일`:""), h("b",{},`${todayD===0?pd.size:prevSame}회`)),
+      h("span",{class:"arrow","aria-hidden":"true"},"→"),
+      h("div",{class:"cmpbox now"}, h("span",{},`${ch.month}월`, todayD>0&&todayD<99?` 1~${upTo}일`:""), h("b",{},`${nowSame}회`)),
+      todayD>0 ? h("b",{class:"cmpdelta "+deltaCls(d)}, deltaTxt(d)) : null,
+      h("p",{}, msg)),
+    h("div",{class:"wkbars","aria-label":"주별 비교"},
+      Array.from({length:n},(_,i)=>h("div",{class:"wkbar"},
+        h("div",{class:"bars"},
+          h("i",{class:"p",style:`height:${((wPrev[i]||0)/max)*100}%`,title:`${prev.month}월 ${i+1}주 ${wPrev[i]??0}회`}),
+          wNow[i]!=null ? h("i",{class:"c",style:`height:${(wNow[i]/max)*100}%`,title:`${ch.month}월 ${i+1}주 ${wNow[i]}회`}) : null),
+        h("span",{},`${i+1}주`),
+        h("small",{},`${wPrev[i]??"-"} → ${wNow[i]??"–"}`)))),
+    h("div",{class:"legend"}, h("span",{}, h("i",{class:"p"}), `${prev.month}월`), h("span",{}, h("i",{class:"c"}), `${ch.month}월`))
+  );
+}
+async function toggleDay(id, d, ch=curChallenge()){
   if (!state.db || state.exSaving) return;
-  const cur=new Set(state.exercise[id]||[]);
+  const cur=exDays(id, ch);
   cur.has(d) ? cur.delete(d) : cur.add(d);
   const days=[...cur].sort((a,b)=>a-b);
-  state.exSaving=true; state.exercise={...state.exercise, [id]:days}; render();
+  state.exSaving=true; state.exercise={...state.exercise, [ch.key]:{...(state.exercise[ch.key]||{}), [id]:days}}; render();
   try{
-    await state.db.collection("exercise").doc(`${CHALLENGE.key}_${id}`).set({classId:id, month:CHALLENGE.key, days, updatedAt:Date.now()});
+    await state.db.collection("exercise").doc(`${ch.key}_${id}`).set({classId:id, month:ch.key, days, updatedAt:Date.now()});
   }catch(e){
     if (e?.code==="invalid_argument"){ toast("체크할 권한이 없어요. 반 비밀번호로 다시 들어와 주세요."); }
     else toast("저장하지 못했어요. 다시 눌러 주세요.");
@@ -1691,7 +1745,7 @@ async function init(){
     const m={}; snap.docs.forEach(d=>{ m[d.id]=d.data(); }); state.attendance=m; if (!isTyping()) render();
   }, ()=>{});
   db.collection("exercise").onSnapshot(snap=>{
-    const m={}; snap.docs.forEach(d=>{ const v=d.data(); if (v.month===CHALLENGE.key) m[v.classId]=v.days||[]; });
+    const m={}; snap.docs.forEach(d=>{ const v=d.data(); if (v.month) (m[v.month] ||= {})[v.classId]=v.days||[]; });
     state.exercise=m; if (!isTyping()) render();
   }, ()=>{});
   for (const name of Object.keys(state.data)){
