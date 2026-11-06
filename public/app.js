@@ -3,12 +3,13 @@
 //  (데이터 저장은 api.js 를 통해 서버 /api 로 보내요)
 // =====================================================================
 const GRADES = [
-  {g:1, classes:3, council:false},   // 1~3학년: 담임 선생님이 관리 (전교회의 출결에는 들어가지 않아요)
-  {g:2, classes:3, council:false},
-  {g:3, classes:3, council:false},
-  {g:4, classes:4, council:true},
-  {g:5, classes:4, council:true},
-  {g:6, classes:5, council:true},
+  // council: 전교회의 출결에 들어가는지 · officers: 학급 임원(회장·부회장)이 있는지 · homeroom: 담임 선생님 성함을 적는지
+  {g:1, classes:3, council:false, officers:false, homeroom:true},   // 1학년: 임원 없음, 담임 선생님이 관리
+  {g:2, classes:3, council:false, officers:true,  homeroom:true},   // 2~3학년: 담임 선생님이 관리 (전교회의 출결에는 들어가지 않아요)
+  {g:3, classes:3, council:false, officers:true,  homeroom:true},
+  {g:4, classes:4, council:true,  officers:true,  homeroom:false},
+  {g:5, classes:4, council:true,  officers:true,  homeroom:false},
+  {g:6, classes:5, council:true,  officers:true,  homeroom:false},
 ];
 const MONTHS = [3,4,5,6,7,8,9,10,11,12,1,2];
 const TABS = [
@@ -34,6 +35,7 @@ function curChallenge(){ const t=new Date(); return (t.getFullYear()===2026 && C
 function exDays(id, ch){ return new Set(((state.exercise[ch.key])||{})[id]||[]); }
 const ROLES = [["president","회장"],["vpBoy","남자 부회장"],["vpGirl","여자 부회장"]];
 const ALL_CLASSES = GRADES.flatMap(({g,classes})=>Array.from({length:classes},(_,i)=>`${g}-${i+1}`));
+const gradeDef = g => GRADES.find(x=>x.g===g) || {};
 const COUNCIL_GRADES = GRADES.filter(x=>x.council);   // 전교회의에 오는 학년 (4~6학년)
 const COUNCIL_CLASSES = COUNCIL_GRADES.flatMap(({g,classes})=>Array.from({length:classes},(_,i)=>`${g}-${i+1}`));
 const MEETING_PLAN = [
@@ -303,11 +305,13 @@ function classView(){
 
 /* 반 페이지 머리말: 회장 / 그 밑에 부회장 */
 function officerLines(id){
-  const o=state.officers[id]||{};
+  const o=state.officers[id]||{}, def=gradeDef(gradeOf(id));
   const nm=v=>v ? h("b",{},v) : h("span",{class:"muted"},"미등록");
   return h("div",{class:"olines"},
-    h("div",{}, h("span",{class:"orole"},"회장"), nm(o.president)),
-    h("div",{}, h("span",{class:"orole"},"부회장"), nm(o.vpBoy), h("span",{class:"muted",style:"font-size:12px"},"(남)"), nm(o.vpGirl), h("span",{class:"muted",style:"font-size:12px"},"(여)"))
+    def.homeroom ? h("div",{}, h("span",{class:"orole"},"담임"), o.teacher ? h("b",{},`${o.teacher} 선생님`) : h("span",{class:"muted"},"미등록")) : null,
+    def.officers!==false ? [
+      h("div",{}, h("span",{class:"orole"},"회장"), nm(o.president)),
+      h("div",{}, h("span",{class:"orole"},"부회장"), nm(o.vpBoy), h("span",{class:"muted",style:"font-size:12px"},"(남)"), nm(o.vpGirl), h("span",{class:"muted",style:"font-size:12px"},"(여)"))] : null
   );
 }
 
@@ -623,9 +627,11 @@ function classesPage(pending, lastMeeting){
         return h("button",{class:"dcard",onclick:()=>go(id),"aria-label":`${g}학년 ${i+1}반 관리`},
           h("div",{class:"plate"}, h("b",{},id), h("span",{},"반")),
           h("dl",{},
+            gradeDef(g).homeroom ? [h("dt",{},"담임"), h("dd",{}, state.officers[id]?.teacher ? `${state.officers[id].teacher} 선생님` : h("span",{class:"muted"},"미등록"))] : null,
+            gradeDef(g).officers!==false ? [
             h("dt",{},"회장"), h("dd",{}, state.officers[id]?.president || h("span",{class:"muted"},"미등록")),
             h("dt",{},"부회장 (남)"), h("dd",{}, state.officers[id]?.vpBoy || h("span",{class:"muted"},"미등록")),
-            h("dt",{},"부회장 (여)"), h("dd",{}, state.officers[id]?.vpGirl || h("span",{class:"muted"},"미등록")),
+            h("dt",{},"부회장 (여)"), h("dd",{}, state.officers[id]?.vpGirl || h("span",{class:"muted"},"미등록"))] : null,
             h("dt",{},"미답변 건의"), h("dd",{class:open?"alert":""},`${open}건`),
             h("dt",{},`${curChallenge().month}월 체조`), h("dd",{class:ex.ok===ex.total?"good":""},`${ex.count}회 · ${ex.ok}/${ex.total}주 달성`),
             h("dt",{},"최근 학급회의"), h("dd",{},lastMeeting(id))
@@ -754,14 +760,14 @@ async function setAtt(date, c, patch){
 }
 
 /* ---------- 자치회 관리 ---------- */
-function officerInput(c,k,l){
+function officerInput(c,k,l,ph="이름"){
   const off=state.officers[c]||{};
-  return h("input",{type:"text",id:`o_${c}_${k}`,maxlength:"20",value:off[k]||"",placeholder:"이름","aria-label":`${unitLabel(c)} ${l} 이름`,
+  return h("input",{type:"text",id:`o_${c}_${k}`,maxlength:"20",value:off[k]||"",placeholder:ph,"aria-label":`${unitLabel(c)} ${l} 이름`,
     onchange:e=>saveOfficer(c,k,e.target.value.trim())});
 }
 function orgPage(){
   return h("form",{onsubmit:e=>e.preventDefault()},
-    h("p",{class:"muted",style:"margin:0 0 12px;font-size:13.5px"},"전교임원과 각 반 회장·부회장 이름을 적으세요. 칸을 벗어나면 바로 저장돼요. 비밀번호 칸에 새 비밀번호를 적으면 그 반(전교임원은 그 사람)이 들어갈 때 쓰는 비밀번호가 바뀌어요. 비밀번호가 없으면 누구나 들어갈 수 있어요."),
+    h("p",{class:"muted",style:"margin:0 0 12px;font-size:13.5px"},"전교임원과 각 반 회장·부회장 이름을 적으세요. 1~3학년은 담임 선생님 성함을 적어요(1학년은 임원이 없어요). 칸을 벗어나면 바로 저장돼요. 비밀번호 칸에 새 비밀번호를 적으면 그 반(전교임원은 그 사람)이 들어갈 때 쓰는 비밀번호가 바뀌어요. 비밀번호가 없으면 누구나 들어갈 수 있어요."),
     h("section",{class:"dash-sec",style:"margin-top:14px"},
       h("h2",{style:"color:var(--ink)"},"전교임원"),
       h("div",{class:"tbl-wrap"}, h("table",{class:"atbl otbl"},
@@ -778,10 +784,11 @@ function orgPage(){
     GRADES.map(({g,classes})=>h("section",{class:`dash-sec g${g}`,style:"margin-top:14px"},
       h("h2",{style:"color:var(--gc)"},`${g}학년`),
       h("div",{class:"tbl-wrap"}, h("table",{class:"atbl otbl"},
-        h("thead",{}, h("tr",{}, h("th",{},"반"), ROLES.map(([,l])=>h("th",{},l)), h("th",{},"반 비밀번호"))),
+        h("thead",{}, h("tr",{}, h("th",{},"반"), gradeDef(g).homeroom ? h("th",{},"담임 선생님") : null, gradeDef(g).officers!==false ? ROLES.map(([,l])=>h("th",{},l)) : null, h("th",{},"반 비밀번호"))),
         h("tbody",{}, Array.from({length:classes},(_,i)=>{ const c=`${g}-${i+1}`;
           return h("tr",{}, h("td",{}, h("span",{class:"cls",style:"color:var(--gc)"},c)),
-            ROLES.map(([k,l])=>h("td",{}, officerInput(c,k,l))), h("td",{}, pinInput("classes",c,`${c} 반 비밀번호`)));
+            gradeDef(g).homeroom ? h("td",{}, officerInput(c,"teacher","담임 선생님","성함")) : null,
+            gradeDef(g).officers!==false ? ROLES.map(([k,l])=>h("td",{}, officerInput(c,k,l))) : null, h("td",{}, pinInput("classes",c,`${c} 반 비밀번호`)));
         }))
       ))
     ))
@@ -793,7 +800,7 @@ async function saveOfficer(c, k, v){
   rolesFor(c).forEach(([key])=>{ body[key]=body[key]||""; });
   body[k]=v; body.updatedAt=Date.now();
   state.officers={...state.officers, [c]:body};
-  try{ await state.db.collection("officers").doc(c).set(body); toast(`${unitLabel(c)} ${(rolesFor(c).find(r=>r[0]===k)||[,"반"])[1]} 저장했어요`); render(); }
+  try{ await state.db.collection("officers").doc(c).set(body); toast(`${unitLabel(c)} ${k==="teacher"?"담임 선생님":(rolesFor(c).find(r=>r[0]===k)||[,"반"])[1]} 저장했어요`); render(); }
   catch(e){ toast("저장하지 못했어요. 다시 입력해 주세요."); }
 }
 
