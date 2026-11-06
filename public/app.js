@@ -14,12 +14,12 @@ const GRADES = [
 const MONTHS = [3,4,5,6,7,8,9,10,11,12,1,2];
 const TABS = [
   {id:"notice",   label:"선생님 안내",   who:"교사"},
-  {id:"ring",     label:"🎯 고리던지기 대항전", who:"학생"},
-  {id:"school",   label:"전교회의 결과", who:"교사"},
-  {id:"meeting",  label:"학급회의 결과", who:"학생"},
+  {id:"ring",     label:"🎯 고리던지기 대항전(11월)", who:"학생"},
   {id:"activity", label:"월별 활동",     who:"학생"},
+  {id:"school",   label:"전교회의 결과", who:"교사"},
   {id:"suggest",  label:"건의사항",      who:"학생"},
   {id:"pledge",   label:"전교임원 공약", who:"교사"},
+  {id:"meeting",  label:"학급회의 결과", who:"학생"},
 ];
 const COLL = {notice:"notices", school:"schoolMeetings", meeting:"meetings", activity:"activities", suggest:"suggestions", agenda:"agendas", send:"sends", msg:"councilMsgs", reply:"councilReplies"};
 /* 기지개 체조 체크표: 달마다 하나씩 (다음 달을 이어서 하려면 여기에 한 줄 추가) */
