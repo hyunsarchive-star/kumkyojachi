@@ -3,9 +3,12 @@
 //  (데이터 저장은 api.js 를 통해 서버 /api 로 보내요)
 // =====================================================================
 const GRADES = [
-  {g:4, classes:4},
-  {g:5, classes:4},
-  {g:6, classes:5},
+  {g:1, classes:3, council:false},   // 1~3학년: 담임 선생님이 관리 (전교회의 출결에는 들어가지 않아요)
+  {g:2, classes:3, council:false},
+  {g:3, classes:3, council:false},
+  {g:4, classes:4, council:true},
+  {g:5, classes:4, council:true},
+  {g:6, classes:5, council:true},
 ];
 const MONTHS = [3,4,5,6,7,8,9,10,11,12,1,2];
 const TABS = [
@@ -31,6 +34,8 @@ function curChallenge(){ const t=new Date(); return (t.getFullYear()===2026 && C
 function exDays(id, ch){ return new Set(((state.exercise[ch.key])||{})[id]||[]); }
 const ROLES = [["president","회장"],["vpBoy","남자 부회장"],["vpGirl","여자 부회장"]];
 const ALL_CLASSES = GRADES.flatMap(({g,classes})=>Array.from({length:classes},(_,i)=>`${g}-${i+1}`));
+const COUNCIL_GRADES = GRADES.filter(x=>x.council);   // 전교회의에 오는 학년 (4~6학년)
+const COUNCIL_CLASSES = COUNCIL_GRADES.flatMap(({g,classes})=>Array.from({length:classes},(_,i)=>`${g}-${i+1}`));
 const MEETING_PLAN = [
   {date:"2026-09-30", time:"오후 2시", place:""},
   {date:"2026-10-28", time:"중간놀이 시간", place:"2층 6-1반 옆 회의실", special:"평소와 시간·장소가 달라요"},
@@ -79,7 +84,7 @@ function unansweredCount(id){ return forClass(state.data.suggestions,id).filter(
 function readHash(){
   if (location.hash==="#teacher"){ state.route="teacher"; state.classId=null; return; }
   if (location.hash==="#council"){ state.route="council"; state.classId="council"; return; }
-  const m = location.hash.match(/^#c([456])-(\d)$/);
+  const m = location.hash.match(/^#c([1-6])-(\d)$/);
   if (m){
     const g=Number(m[1]), c=Number(m[2]);
     const def = GRADES.find(x=>x.g===g);
@@ -417,7 +422,7 @@ function noticeForm(id, n){
     h("label",{},"링크 (선택 · 한 줄에 하나씩 · 주소 앞에 설명을 적어도 돼요)",
       h("textarea",{id:"n_links",name:"n_links",style:"min-height:60px",placeholder:"예: 가정통신문 https://school.example.kr/notice/123\nhttps://padlet.com/우리학교/자치회"},
         (v.links||[]).map(l=>(l.label?l.label+" ":"")+l.url).join("\n"))),
-    h("label",{class:"check"}, h("input",{type:"checkbox",id:"n_all",name:"n_all",checked:v.classId==="all"}), "모든 반(4~6학년)에 함께 안내하기"),
+    h("label",{class:"check"}, h("input",{type:"checkbox",id:"n_all",name:"n_all",checked:v.classId==="all"}), "모든 반(1~6학년)에 함께 안내하기"),
     n ? h("div",{class:"actions"},
           h("button",{type:"button",class:"btn ghost",onclick:()=>{state.editing=null;render();}},"취소"),
           h("button",{type:"submit",class:"btn"},"수정 저장"))
@@ -654,7 +659,7 @@ function classSwitcher(cur){
 
 /* ---------- 전교회의 출결 ---------- */
 const SCHOOL_ROLES = [["president","6학년 전교회장"],["vp6","6학년 전교부회장"],["vp5","5학년 전교부회장"]];
-const ATT_UNITS = ["school", ...ALL_CLASSES];
+const ATT_UNITS = ["school", ...COUNCIL_CLASSES];
 const rolesFor = c => c==="school" ? SCHOOL_ROLES : ROLES;
 const unitLabel = c => c==="school" ? "전교임원" : c;
 function cleanNames(o){ const n={...(o||{})}; delete n.classId; delete n.updatedAt; return n; }
@@ -684,7 +689,7 @@ function attendanceBlock(date){
     )),
     h("div",{class:"tbl-wrap"}, h("table",{class:"atbl"},
       h("thead",{}, h("tr",{}, h("th",{},"반"), ROLES.map(([,l])=>h("th",{},l)))),
-      h("tbody",{}, ALL_CLASSES.map(c=>{ const r=rec.records?.[c], names=r?.names||cleanNames(state.officers[c]);
+      h("tbody",{}, COUNCIL_CLASSES.map(c=>{ const r=rec.records?.[c], names=r?.names||cleanNames(state.officers[c]);
         return h("tr",{class:(c===mine?"mine ":"")+`g${gradeOf(c)}`}, h("td",{}, h("span",{class:"cls"},c)),
           ROLES.map(([k])=>markCell(r,k,names[k]))); }))
     ))
@@ -722,7 +727,7 @@ function attendPage(){
         h("tbody",{}, attRow(date, rec, "school", "var(--ink)"))
       ))
     ),
-    GRADES.map(({g,classes})=>h("section",{class:`dash-sec g${g}`,style:"margin-top:14px"},
+    COUNCIL_GRADES.map(({g,classes})=>h("section",{class:`dash-sec g${g}`,style:"margin-top:14px"},
       h("h2",{style:"color:var(--gc)"},`${g}학년`),
       h("div",{class:"tbl-wrap"}, h("table",{class:"atbl"},
         h("thead",{}, h("tr",{}, h("th",{},"반"), ROLES.map(([,l])=>h("th",{},l)), h("th",{},""))),
@@ -1421,7 +1426,7 @@ function ringHomeBanner(){
         h("b",{},RING.title)),
       h("div",{class:"muted",style:"font-size:13.5px"}, `11월 9일(월) ~ 13일(금) · 장소: ${RING.place} · 신청 ${played.length+waiting.length}반 · 경기 끝 ${played.length}반`),
       top.length ? h("ol",{class:"rb-top"}, top.map(r=>h("li",{}, h("span",{class:"medal m"+r.rank}, `${r.rank}위`), h("b",{},r.c), h("span",{},`${r.total}개`))))
-        : h("p",{class:"muted",style:"margin:0;font-size:13.5px"}, "4~6학년 학급 신청을 받고 있어요. 우리 반 페이지 → 🎯 고리던지기 대항전 탭에서 신청하면 선생님이 경기 날짜와 시간을 정해 알려 줘요."))
+        : h("p",{class:"muted",style:"margin:0;font-size:13.5px"}, "1~6학년 학급 신청을 받고 있어요. 우리 반 페이지 → 🎯 고리던지기 대항전 탭에서 신청하면 선생님이 경기 날짜와 시간을 정해 알려 줘요."))
   );
 }
 function ringSchedList(highlight){
@@ -1436,7 +1441,7 @@ function ringSchedList(highlight){
 function ringBoard(highlight){
   const {played, waiting} = ringStanding();
   const best = {}; played.forEach(r=>{ const g=gradeOf(r.c); if (!best[g] || r.total>best[g]) best[g]=r.total; });
-  if (!played.length && !waiting.length) return emptyState("아직 신청한 학급이 없어요","4~6학년 학급이 신청하면 여기에 결과판이 생겨요.");
+  if (!played.length && !waiting.length) return emptyState("아직 신청한 학급이 없어요","1~6학년 학급이 신청하면 여기에 결과판이 생겨요.");
   return h("div",{class:"tbl-wrap"}, h("table",{class:"atbl ringtbl"},
     h("thead",{}, h("tr",{}, h("th",{},"순위"), h("th",{},"반"), h("th",{},"1판"), h("th",{},"2판"), h("th",{},"3판"), h("th",{},"합계"), h("th",{},"경기 일시"))),
     h("tbody",{},
@@ -1461,7 +1466,7 @@ function ringRules(){
       h("div",{}, h("b",{},"세 판 합산"), h("span",{},"장대에 건 고리 수를 모두 더해요")),
       h("div",{}, h("b",{},RING.place), h("span",{},"경기 장소")),
       h("div",{}, h("b",{},"11/9 ~ 11/13"), h("span",{},"선생님이 반별 일시를 배정해요")),
-      h("div",{}, h("b",{},"4~6학년"), h("span",{},"참여하고 싶은 학급 신청"))));
+      h("div",{}, h("b",{},"1~6학년"), h("span",{},"참여하고 싶은 학급 신청"))));
 }
 function ringPane(){
   const id=state.classId, g=gradeOf(id);
@@ -1471,7 +1476,7 @@ function ringPane(){
   return h("div",{},
     h("div",{class:"pane-intro"}, h("p",{}, `11월은 ${RING.month}! 참여하고 싶은 학급이 신청하면 선생님이 경기 날짜와 시간을 정해 알려 줘요. 결과는 모든 반에 공개돼요.`)),
     ringRules(),
-    ![4,5,6].includes(g) ? null : h("section",{class:"card ringapply"},
+    h("section",{class:"card ringapply"},
       h("div",{class:"head"}, h("h3",{},`${id}반 참여 신청`), h("span",{class:"pill "+(applied?"s-done":"all")}, applied?"신청 완료":"신청 전")),
       applied
         ? [sd ? h("div",{class:"ringnotice"}, h("span",{},"📅 경기 일정이 정해졌어요"), h("b",{}, ringWhen(sd)), h("span",{},`장소: ${RING.place}`))

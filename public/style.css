@@ -9,6 +9,7 @@ img{max-width:100%}
 :root{
   --bg:#f3f5f7; --surface:#ffffff; --surface-2:#eaeef2; --line:#d5dce3;
   --fg:#1d2733; --muted:#5d6b7a; --ink:#22406b; --ink-fg:#ffffff;
+  --g1:#c23b6b; --g1-soft:#fbe4ec; --g2:#9a6a00; --g2-soft:#fbf0d6; --g3:#7448b8; --g3-soft:#eee6fa;
   --g4:#2f8a5b; --g4-soft:#e1f2e8; --g5:#2f6fb6; --g5-soft:#e2edf9; --g6:#c2602b; --g6-soft:#fbe9dd;
   --ok:#2f8a5b; --warn:#b7791f; --danger:#b4433a; --hl:#c2410c; --hl-soft:#fff1e6;
   --f-display:"Jua","Noto Sans KR",system-ui,sans-serif;
@@ -18,11 +19,13 @@ img{max-width:100%}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#141a21; --surface:#1c242d; --surface-2:#252f3a; --line:#34414e;
   --fg:#e6ebf0; --muted:#9aa8b6; --ink:#8fb3e8; --ink-fg:#0f1620;
+  --g1:#ef7fa6; --g1-soft:#3b1d28; --g2:#e2b84a; --g2-soft:#352a12; --g3:#b49af0; --g3-soft:#2a2140;
   --g4:#5fc08c; --g4-soft:#1d3328; --g5:#6fa6e6; --g5-soft:#1c2b3e; --g6:#ec9361; --g6-soft:#3a2619;
   --ok:#5fc08c; --warn:#e0b04f; --danger:#e57a70; --hl:#f59a5b; --hl-soft:#3a2416; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#141a21; --surface:#1c242d; --surface-2:#252f3a; --line:#34414e;
   --fg:#e6ebf0; --muted:#9aa8b6; --ink:#8fb3e8; --ink-fg:#0f1620;
+  --g1:#ef7fa6; --g1-soft:#3b1d28; --g2:#e2b84a; --g2-soft:#352a12; --g3:#b49af0; --g3-soft:#2a2140;
   --g4:#5fc08c; --g4-soft:#1d3328; --g5:#6fa6e6; --g5-soft:#1c2b3e; --g6:#ec9361; --g6-soft:#3a2619;
   --ok:#5fc08c; --warn:#e0b04f; --danger:#e57a70; --hl:#f59a5b; --hl-soft:#3a2416; color-scheme:dark}
 
@@ -320,7 +323,7 @@ i.p{background:var(--line)} i.c{background:var(--gc)}
 .plate span{font-size:13px}
 .door .meta{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:8px;font-variant-numeric:tabular-nums}
 .door .meta .new{color:var(--danger);font-weight:700}
-.g4{--gc:var(--g4);--gcs:var(--g4-soft)} .g5{--gc:var(--g5);--gcs:var(--g5-soft)} .g6{--gc:var(--g6);--gcs:var(--g6-soft)}
+.g1{--gc:var(--g1);--gcs:var(--g1-soft)} .g2{--gc:var(--g2);--gcs:var(--g2-soft)} .g3{--gc:var(--g3);--gcs:var(--g3-soft)} .g4{--gc:var(--g4);--gcs:var(--g4-soft)} .g5{--gc:var(--g5);--gcs:var(--g5-soft)} .g6{--gc:var(--g6);--gcs:var(--g6-soft)}
 
 /* ---------- 반 페이지 ---------- */
 .back{all:unset;cursor:pointer;color:var(--muted);font-size:14px;display:inline-flex;gap:6px;margin-bottom:14px}

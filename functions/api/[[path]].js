@@ -8,7 +8,7 @@
 //                   SESSION_SECRET  (로그인 서명용 긴 임의 문자열, 권장)
 // =====================================================================
 
-const GRADES = [{ g: 4, classes: 4 }, { g: 5, classes: 4 }, { g: 6, classes: 5 }];
+const GRADES = [{ g: 1, classes: 3 }, { g: 2, classes: 3 }, { g: 3, classes: 3 }, { g: 4, classes: 4 }, { g: 5, classes: 4 }, { g: 6, classes: 5 }];
 const ALL_CLASSES = GRADES.flatMap(({ g, classes }) => Array.from({ length: classes }, (_, i) => `${g}-${i + 1}`));
 const COUNCIL_ROLES = ["president", "vp6", "vp5"];
 
