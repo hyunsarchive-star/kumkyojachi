@@ -1423,7 +1423,7 @@ function calWeeks(ch=curChallenge()){
 /* 전교임원이 보는 10월 기지개 체조 결과 (보기만 해요) */
 /* ---------- 11월 전통놀이의 달 · 장대 고리던지기 대항전 ---------- */
 const RING = { title:"장대 고리던지기 대항전", month:"전통놀이의 달", place:"보도블럭", maxPlayers:10, rounds:3, secs:60,
-  applyFrom:"2026-11-09", applyTo:"2026-11-13",          // 신청 기간: 11/9(월) ~ 11/13(금)
+  applyFrom:"2026-11-09", applyTo:"2026-11-20",          // 신청: 11/9(월)부터 경기 마지막 날 11/20(금)까지 계속 받아요
   days:["2026-11-16","2026-11-17","2026-11-18","2026-11-19","2026-11-20"], slots:["중간놀이 시간","점심시간"] };  // 경기 기간: 11/16(월) ~ 11/20(금)
 function ringApplyState(){ const t=todayYmd(); return t<RING.applyFrom ? "before" : t>RING.applyTo ? "after" : "open"; }
 const RING_IMG = window.RING_IMG_SRC || "/img/ring-toss.png";
@@ -1464,7 +1464,7 @@ function ringHomeBanner(){
       h("div",{class:"rb-head"},
         h("span",{class:"rb-tag"},`11월 ${RING.month}`),
         h("b",{},RING.title)),
-      h("div",{class:"muted",style:"font-size:13.5px"}, `신청 11월 9일(월) ~ 13일(금) · 경기 11월 16일(월) ~ 20일(금) · 장소: ${RING.place} · 신청 ${played.length+waiting.length}반 · 경기 끝 ${played.length}반`),
+      h("div",{class:"muted",style:"font-size:13.5px"}, `신청 받는 중 (11월 20일까지) · 경기 11월 16일(월) ~ 20일(금) · 장소: ${RING.place} · 신청 ${played.length+waiting.length}반 · 경기 끝 ${played.length}반`),
       top.length ? h("ol",{class:"rb-top"}, top.map(r=>h("li",{}, h("span",{class:"medal m"+r.rank}, `${r.rank}위`), h("b",{},r.c), h("span",{},`${r.total}개`))))
         : h("p",{class:"muted",style:"margin:0;font-size:13.5px"}, "1~6학년 학급 신청을 받고 있어요. 우리 반 페이지 → 🎯 고리던지기 대항전 탭에서 신청하면 선생님이 경기 날짜와 시간을 정해 알려 줘요."))
   );
@@ -1505,7 +1505,7 @@ function ringRules(){
       h("div",{}, h("b",{},`1분 × ${RING.rounds}판`), h("span",{},"한 학생이 여러 판에 나와도 돼요")),
       h("div",{}, h("b",{},"세 판 합산"), h("span",{},"장대에 건 고리 수를 모두 더해요")),
       h("div",{}, h("b",{},RING.place), h("span",{},"경기 장소")),
-      h("div",{}, h("b",{},"신청 11/9 ~ 11/13"), h("span",{},"1~6학년 원하는 학급이 신청해요")),
+      h("div",{}, h("b",{},"신청 ~ 11/20"), h("span",{},"1~6학년 원하는 학급은 언제든 신청해요")),
       h("div",{}, h("b",{},"경기 11/16 ~ 11/20"), h("span",{},"선생님이 반별 일시를 배정해요")),
       null));
 }
@@ -1526,7 +1526,7 @@ function ringPane(){
            !sc && !sd && writeAllowed("ring") ? h("div",{class:"actions",style:"justify-content:flex-start"},
              h("button",{class:"btn small ghost",onclick:()=>ringApply(id,false)},"신청 취소")) : null]
         : writeAllowed("ring") && ringApplyState()!=="open" && !state.teacher
-          ? h("p",{class:"muted",style:"margin:0"}, ringApplyState()==="before" ? "신청 기간은 11월 9일(월) ~ 13일(금)이에요. 9일부터 이 칸에서 신청할 수 있어요." : "신청이 마감됐어요(11월 13일까지). 결과판에서 다른 반 경기를 응원해요!")
+          ? h("p",{class:"muted",style:"margin:0"}, ringApplyState()==="before" ? "신청 기간은 11월 9일(월) ~ 13일(금)이에요. 9일부터 이 칸에서 신청할 수 있어요." : "신청이 마감됐어요(11월 20일까지). 결과판에서 다른 반 경기를 응원해요!")
         : writeAllowed("ring") ? h("form",{class:"ringform","data-key":"ring-apply",onsubmit:e=>{e.preventDefault();
             ringApply(id,true,{slot:e.target.r_slot.value});
           }},
