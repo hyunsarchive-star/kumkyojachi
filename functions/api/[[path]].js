@@ -15,7 +15,7 @@ const COUNCIL_ROLES = ["president", "vp6", "vp5"];
 const COLLECTIONS = [
   "notices", "schoolMeetings", "meetings", "activities", "suggestions", "agendas",
   "sends", "exercise", "officers", "schoolAttendance", "pledges",
-  "councilMsgs", "councilReplies", "ringApply", "ringScores", "ringSchedule",
+  "councilMsgs", "councilReplies", "ringApply", "ringScores", "ringSchedule", "rentals",
 ];
 const TEACHER_ONLY = new Set(["notices", "schoolMeetings", "schoolAttendance", "officers", "pledges", "councilMsgs", "ringSchedule"]);
 
@@ -31,7 +31,7 @@ const K = {
   salt: "cfg:salt",
   backup: "backup:server",  // 서버 저장본
   backupMeta: "backup:meta",
-  att: id => `att:${id}`,   // 첨부파일
+  att: id => `att:${id}`,   // 첨부파일·안내 사진
 };
 
 // ---------------------------------------------------------------------
@@ -237,12 +237,20 @@ function checkWrite(auth, pins, col, oldDoc, data, id) {
       if (!auth.council) deny();
       return data;
     case "ringApply":
-      // 고리던지기 대회 신청: 그 반만 자기 반을 신청·취소할 수 있어요 (문서 id = 반)
+      // 고리던지기 대항전 신청: 그 반만 자기 반을 신청·취소할 수 있어요 (문서 id = 반)
       if (id !== data.classId || !classAllowed(auth, pins, data.classId)) deny();
       return data;
     case "ringScores":
       // 경기 기록은 전교임원(심판)과 교사만 넣어요
       if (!auth.council || id !== data.classId || !ALL_CLASSES.includes(data.classId)) deny();
+      return data;
+    case "rentals":
+      // 전통놀이 물품 대여: 반은 신청·취소만, 빌려주기·반납 확인은 전교임원(자치회)과 교사가 해요
+      if (!ALL_CLASSES.includes(data.classId)) throw new HttpError(400, "반을 확인해 주세요.");
+      if (auth.council) return data;
+      if (!classAllowed(auth, pins, data.classId)) deny();
+      if (!oldDoc) { if (data.status !== "reserved") deny(); return data; }
+      if (oldDoc.classId !== data.classId || oldDoc.status !== "reserved" || data.status !== "canceled") deny();
       return data;
     case "councilReplies":
       // 전교임원은 자기 답장만 쓰고 고칠 수 있어요 (문서 id = 메시지id_역할)

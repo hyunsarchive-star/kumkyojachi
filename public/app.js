@@ -48,7 +48,7 @@ const STATUS = {new:"접수", review:"검토 중", done:"답변 완료"};
 
 const state = {
   db:null, teacher:false, dbReady:false, dbFailed:false,
-  data:{notices:[], schoolMeetings:[], meetings:[], activities:[], suggestions:[], agendas:[], sends:[], councilMsgs:[], councilReplies:[], ringApply:[], ringScores:[], ringSchedule:[]},
+  data:{notices:[], schoolMeetings:[], meetings:[], activities:[], suggestions:[], agendas:[], sends:[], councilMsgs:[], councilReplies:[], ringApply:[], ringScores:[], ringSchedule:[], rentals:[]},
   ctab:"pledge", sFilter:"all", agendaDraft:null, editing:null,
   pins:{classes:{}, council:{}}, pinsLoaded:false, pinsExists:false, units:new Set(), councilUser:null, lockErr:"",
   backupMeta:null, fileMeta:null, restorePending:null, busy:"", sendFile:null, downloads:null,
@@ -476,6 +476,7 @@ function activityPane(){
       })
     ),
     CHALLENGES[state.month] && id!=="council" ? exerciseTable(id, CHALLENGES[state.month]) : null,
+    state.month===RENTAL.month && id!=="council" ? rentalSection(id) : null,
     state.composing && writeAllowed("activity") ? h("form",{class:"compose",onsubmit:e=>{e.preventDefault();
       const f=e.target; const m=Number(f.a_month.value);
       save("activity",{month:m, title:f.a_title.value.trim(), body:f.a_body.value.trim(), author:f.a_author.value.trim(), classId:id}, ()=>{state.month=m;});
@@ -611,10 +612,10 @@ function dashboard(){
     ),
     statusBanner(),
     h("div",{class:"tabs",role:"tablist",style:"--gc:var(--ink)"},
-      [["classes","반 현황"],["inbox",`받은 자료${state.data.sends.filter(x=>x.status!=="seen").length?" "+state.data.sends.filter(x=>x.status!=="seen").length:""}`],["msgs",`전교임원 메시지함${msgUnreadForTeacher()?" "+msgUnreadForTeacher():""}`],["attend","전교회의 출결"],["org","자치회 관리"],["pledge","전교임원 공약"],["ring","고리던지기 대항전"],["backup","백업·설정"]].map(([k,l])=>
+      [["classes","반 현황"],["inbox",`받은 자료${state.data.sends.filter(x=>x.status!=="seen").length?" "+state.data.sends.filter(x=>x.status!=="seen").length:""}`],["msgs",`전교임원 메시지함${msgUnreadForTeacher()?" "+msgUnreadForTeacher():""}`],["attend","전교회의 출결"],["org","자치회 관리"],["pledge","전교임원 공약"],["ring","고리던지기 대항전"],["rental","놀이 물품 대여"],["backup","백업·설정"]].map(([k,l])=>
         h("button",{class:"tab",role:"tab","aria-selected":String(state.dtab===k),onclick:()=>{state.dtab=k;state.homeComposing=false;state.editing=null;render();}},l))
     ),
-    state.dtab==="inbox" ? inboxPage() : state.dtab==="msgs" ? msgPane() : state.dtab==="backup" ? backupPage() : state.dtab==="attend" ? attendPage() : state.dtab==="org" ? orgPage() : state.dtab==="pledge" ? pledgePane() : state.dtab==="ring" ? ringJudgePane() : classesPage(pending, lastMeeting)
+    state.dtab==="inbox" ? inboxPage() : state.dtab==="msgs" ? msgPane() : state.dtab==="backup" ? backupPage() : state.dtab==="attend" ? attendPage() : state.dtab==="org" ? orgPage() : state.dtab==="pledge" ? pledgePane() : state.dtab==="ring" ? ringJudgePane() : state.dtab==="rental" ? rentalSection(null) : classesPage(pending, lastMeeting)
   );
 }
 
@@ -722,8 +723,13 @@ function attendPage(){
         h("label",{},"전교회의 날짜", h("input",{type:"date",id:"att_date",value:date,onchange:e=>{state.attDate=e.target.value;render();}})),
         uniq.length ? h("div",{class:"dchips"}, uniq.map(d=>h("button",{class:"mbtn","aria-pressed":String(d===date),onclick:()=>{state.attDate=d;render();}},fmtYmd(d)))) : null
       ),
-      h("div",{style:"text-align:right"}, h("div",{class:"att-total"},`출석 ${sm.inn} / ${sm.total}`),
-        h("div",{class:"att-sum"}, `${sm.checked}칸 체크함 · 체크 안 한 칸은 ‘–’로 보여요`))
+      h("div",{style:"text-align:right;display:grid;gap:6px;justify-items:end"}, h("div",{class:"att-total"},`출석 ${sm.inn} / ${sm.total}`),
+        h("div",{class:"att-sum"}, `${sm.checked}칸 체크함 · 체크 안 한 칸은 ‘–’로 보여요`),
+        rec ? (state.attDelConfirm===date
+          ? h("span",{class:"confirm"}, `${fmtYmd(date)} 출결 기록을 모두 지울까요?`,
+              h("button",{class:"btn small danger",onclick:()=>deleteAtt(date)},"지우기"),
+              h("button",{class:"btn small ghost",onclick:()=>{state.attDelConfirm=null;render();}},"취소"))
+          : h("button",{class:"btn small danger",onclick:()=>{state.attDelConfirm=date;render();}},"이 날짜 출결 삭제")) : null)
     ),
     h("p",{class:"muted",style:"margin:0 0 12px;font-size:13.5px"},"출석한 학생에 체크하세요. 한 줄에서 하나라도 체크하면 그 줄의 체크 안 된 칸은 결석으로 기록돼요. 이 날짜에 올린 전교회의 결과에 출석표가 함께 보여요."),
     h("section",{class:"dash-sec",style:"margin-top:14px"},
@@ -741,6 +747,15 @@ function attendPage(){
       ))
     ))
   );
+}
+async function deleteAtt(date){
+  state.attDelConfirm=null;
+  try{
+    await state.db.collection("schoolAttendance").doc(date).delete();
+    const rest={...state.attendance}; delete rest[date]; state.attendance=rest;
+    if (state.attDate===date) state.attDate=null;
+    render(); toast(`${fmtYmd(date)} 출결 기록을 지웠어요`);
+  }catch(e){ toast(e?.message||"지우지 못했어요. 다시 시도해 주세요."); render(); }
 }
 async function setAtt(date, c, patch){
   if (!state.db || state.attSaving) return;
@@ -813,6 +828,7 @@ const CTABS = [
   {id:"school", label:"전교회의 결과"},
   {id:"activity", label:"활동 기록"},
   {id:"ring", label:"🎯 고리던지기 대항전"},
+  {id:"rental", label:"🎲 놀이 물품 대여"},
   {id:"exercise", label:"기지개 체조"},
   {id:"send", label:"✉ 선생님께 보내기"},
 ];
@@ -865,6 +881,7 @@ function councilView(){
       state.ctab==="school" ? schoolPane() :
       state.ctab==="activity" ? activityPane() :
       state.ctab==="ring" ? ringJudgePane() :
+      state.ctab==="rental" ? rentalSection(null) :
       state.ctab==="exercise" ? exerciseBoard() :
       state.ctab==="send" ? sendPane() : pledgePane())
   );
@@ -1406,11 +1423,27 @@ function calWeeks(ch=curChallenge()){
 /* 전교임원이 보는 10월 기지개 체조 결과 (보기만 해요) */
 /* ---------- 11월 전통놀이의 달 · 장대 고리던지기 대항전 ---------- */
 const RING = { title:"장대 고리던지기 대항전", month:"전통놀이의 달", place:"보도블럭", maxPlayers:10, rounds:3, secs:60,
-  days:["2026-11-09","2026-11-10","2026-11-11","2026-11-12","2026-11-13"], slots:["중간놀이 시간","점심시간"] };
+  applyFrom:"2026-11-09", applyTo:"2026-11-13",          // 신청 기간: 11/9(월) ~ 11/13(금)
+  days:["2026-11-16","2026-11-17","2026-11-18","2026-11-19","2026-11-20"], slots:["중간놀이 시간","점심시간"] };  // 경기 기간: 11/16(월) ~ 11/20(금)
+function ringApplyState(){ const t=todayYmd(); return t<RING.applyFrom ? "before" : t>RING.applyTo ? "after" : "open"; }
 const RING_IMG = window.RING_IMG_SRC || "/img/ring-toss.png";
 function ringApplied(){ return state.data.ringApply.filter(a=>a.applied!==false); }
 function ringScoreOf(c){ return state.data.ringScores.find(s=>s.classId===c); }
-function ringSchedOf(c){ const r=state.data.ringSchedule.find(s=>s.classId===c); return r && r.date ? r : null; }
+/* 예전에 11/9~11/13 주간으로 배정한 일정은 같은 요일의 11/16~11/20로 옮겨서 보여 줘요 */
+function ringShiftDate(d){ return d>="2026-11-09" && d<="2026-11-13" ? ymdAdd(d,7) : d; }
+function ringSchedOf(c){ const r=state.data.ringSchedule.find(s=>s.classId===c); return r && r.date ? {...r, date:ringShiftDate(r.date)} : null; }
+/* 선생님이 대항전 탭을 열면 옮긴 날짜를 실제로 저장해 둬요 (한 번만) */
+let ringMigrating=false;
+async function ringMigrateOld(){
+  if (!state.teacher || ringMigrating || !state.db) return;
+  const old=state.data.ringSchedule.filter(r=>r.date && r.date!==ringShiftDate(r.date));
+  if (!old.length) return;
+  ringMigrating=true;
+  try{
+    for (const r of old){ const {id,_w,...rest}=r; await state.db.collection("ringSchedule").doc(r.id).set({...rest, date:ringShiftDate(r.date), updatedAt:Date.now()}); }
+    toast(`예전 배정 ${old.length}개를 11월 16일 주간 같은 요일로 옮겼어요`);
+  }catch(e){ ringMigrating=false; }
+}
 function ringTotal(sc){ return sc ? (sc.rounds||[]).reduce((n,v)=>n+(Number(v)||0),0) : null; }
 function ringWhen(sd){ return sd ? `${planLabel({date:sd.date})} ${sd.slot||""}`.trim() : ""; }
 const byClass = (a,b)=>a.localeCompare(b,undefined,{numeric:true});
@@ -1431,7 +1464,7 @@ function ringHomeBanner(){
       h("div",{class:"rb-head"},
         h("span",{class:"rb-tag"},`11월 ${RING.month}`),
         h("b",{},RING.title)),
-      h("div",{class:"muted",style:"font-size:13.5px"}, `11월 9일(월) ~ 13일(금) · 장소: ${RING.place} · 신청 ${played.length+waiting.length}반 · 경기 끝 ${played.length}반`),
+      h("div",{class:"muted",style:"font-size:13.5px"}, `신청 11월 9일(월) ~ 13일(금) · 경기 11월 16일(월) ~ 20일(금) · 장소: ${RING.place} · 신청 ${played.length+waiting.length}반 · 경기 끝 ${played.length}반`),
       top.length ? h("ol",{class:"rb-top"}, top.map(r=>h("li",{}, h("span",{class:"medal m"+r.rank}, `${r.rank}위`), h("b",{},r.c), h("span",{},`${r.total}개`))))
         : h("p",{class:"muted",style:"margin:0;font-size:13.5px"}, "1~6학년 학급 신청을 받고 있어요. 우리 반 페이지 → 🎯 고리던지기 대항전 탭에서 신청하면 선생님이 경기 날짜와 시간을 정해 알려 줘요."))
   );
@@ -1472,8 +1505,9 @@ function ringRules(){
       h("div",{}, h("b",{},`1분 × ${RING.rounds}판`), h("span",{},"한 학생이 여러 판에 나와도 돼요")),
       h("div",{}, h("b",{},"세 판 합산"), h("span",{},"장대에 건 고리 수를 모두 더해요")),
       h("div",{}, h("b",{},RING.place), h("span",{},"경기 장소")),
-      h("div",{}, h("b",{},"11/9 ~ 11/13"), h("span",{},"선생님이 반별 일시를 배정해요")),
-      h("div",{}, h("b",{},"1~6학년"), h("span",{},"참여하고 싶은 학급 신청"))));
+      h("div",{}, h("b",{},"신청 11/9 ~ 11/13"), h("span",{},"1~6학년 원하는 학급이 신청해요")),
+      h("div",{}, h("b",{},"경기 11/16 ~ 11/20"), h("span",{},"선생님이 반별 일시를 배정해요")),
+      null));
 }
 function ringPane(){
   const id=state.classId, g=gradeOf(id);
@@ -1491,6 +1525,8 @@ function ringPane(){
            sc ? h("p",{style:"margin:0"}, h("b",{},`우리 반 기록 ${ringTotal(sc)}개`), ` (${(sc.rounds||[]).join(" + ")})`) : null,
            !sc && !sd && writeAllowed("ring") ? h("div",{class:"actions",style:"justify-content:flex-start"},
              h("button",{class:"btn small ghost",onclick:()=>ringApply(id,false)},"신청 취소")) : null]
+        : writeAllowed("ring") && ringApplyState()!=="open" && !state.teacher
+          ? h("p",{class:"muted",style:"margin:0"}, ringApplyState()==="before" ? "신청 기간은 11월 9일(월) ~ 13일(금)이에요. 9일부터 이 칸에서 신청할 수 있어요." : "신청이 마감됐어요(11월 13일까지). 결과판에서 다른 반 경기를 응원해요!")
         : writeAllowed("ring") ? h("form",{class:"ringform","data-key":"ring-apply",onsubmit:e=>{e.preventDefault();
             ringApply(id,true,{slot:e.target.r_slot.value});
           }},
@@ -1512,13 +1548,14 @@ async function ringApply(id, on, extra={}){
   }catch(e){ toast(e?.message||"저장하지 못했어요. 다시 시도해 주세요."); }
 }
 function ringJudgePane(){
+  setTimeout(ringMigrateOld,0);
   const canJudge = state.teacher || !!state.councilUser;
   const list = ringApplied().slice().sort((a,b)=>byClass(a.classId,b.classId));
   return h("div",{},
     h("div",{class:"pane-intro"}, h("p",{}, state.teacher ? "신청한 학급에 경기 날짜와 시간을 배정하면 그 반 페이지에 바로 알림이 떠요. 경기가 끝나면 판마다 넣은 고리 수를 적어요." : canJudge ? "경기가 끝나면 판마다 넣은 고리 수를 적고 저장해요. 모든 반 결과판에 바로 보여요." : "전교임원이 로그인하면 기록을 넣을 수 있어요.")),
     ringRules(),
     !list.length ? emptyState("아직 신청한 학급이 없어요","각 반 페이지 → 🎯 고리던지기 대항전 탭에서 신청할 수 있어요.") : null,
-    state.teacher && list.length ? [h("h3",{class:"ringtitle"},"경기 일정 배정 (11/9 ~ 11/13)"),
+    state.teacher && list.length ? [h("h3",{class:"ringtitle"},"경기 일정 배정 (11/16 ~ 11/20)"),
       h("div",{class:"tbl-wrap"}, h("table",{class:"atbl ringjudge"},
         h("thead",{}, h("tr",{}, h("th",{},"반"), h("th",{},"희망 시간"), h("th",{},"날짜"), h("th",{},"시간"), h("th",{},""))),
         h("tbody",{}, list.map(a=>{ const c=a.classId, sd=ringSchedOf(c);
@@ -1578,6 +1615,102 @@ async function ringSave(c){
 async function ringClear(c){
   try{ await state.db.collection("ringScores").doc(c).delete(); toast("기록을 지웠어요"); }
   catch(e){ toast(e?.message||"지우지 못했어요."); }
+}
+
+/* ---------- 11월 전통놀이 물품 대여 (자치회 관리) ---------- */
+const RENTAL = { month:11, days:7,
+  items:[
+    {id:"yut",    name:"대형 윷놀이",     qty:2, icon:"🎲"},
+    {id:"ojaemi", name:"오재미 던지기",   qty:2, icon:"🎯"},
+    {id:"ring",   name:"장대 고리던지기", qty:5, icon:"⭕"},
+    {id:"ddakji", name:"대형 딱지치기",   qty:1, icon:"🟥"},
+  ]};
+const RENT_ST = {reserved:"신청됨 · 받기 전", out:"대여 중", returned:"반납 완료", canceled:"취소"};
+function ymdAdd(ymd, n){ const [y,m,d]=ymd.split("-").map(Number); const t=new Date(y,m-1,d+n); return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`; }
+function rentItem(id){ return RENTAL.items.find(x=>x.id===id) || {name:id, qty:0, icon:""}; }
+function rentActive(){ return state.data.rentals.filter(r=>r.status==="reserved" || r.status==="out"); }
+/* 기간 [start, due)이 겹치는 활성 대여 수 */
+function rentUsed(item, start, due, exceptId){
+  return rentActive().filter(r=>r.item===item && r.id!==exceptId && r.start<due && start<r.due).length;
+}
+function rentFreeNow(item){ const t=todayYmd(); return rentItem(item).qty - rentUsed(item, t, ymdAdd(t,1)); }
+function rentNextFree(item){
+  const t=todayYmd(), dues=rentActive().filter(r=>r.item===item && r.due>t).map(r=>r.due).sort();
+  return dues[0] || null;
+}
+function rentLate(r){ return r.status==="out" && r.due<=todayYmd(); }
+function rentDateLabel(ymd){ return planLabel({date:ymd}); }
+function rentalSection(id){
+  const canManage = state.teacher || !!state.councilUser;
+  const mine = id ? state.data.rentals.filter(r=>r.classId===id && r.status!=="canceled") : [];
+  const t=todayYmd();
+  const all = state.data.rentals.filter(r=>r.status!=="canceled")
+    .sort((a,b)=>({out:0,reserved:1,returned:2}[a.status]-{out:0,reserved:1,returned:2}[b.status]) || a.start.localeCompare(b.start) || byClass(a.classId,b.classId));
+  return h("section",{class:"rent",style:id?null:"--gc:var(--ink)"},
+    h("div",{class:"ex-head"},
+      h("div",{}, h("h3",{},"🎲 11월 전통놀이 물품 대여"),
+        h("p",{}, `신청한 날부터 ${RENTAL.days}일(1주일) 동안 쓰고 반납해요. 물품은 전교임원(자치회)이 빌려주고 돌려받아요.`))),
+    h("div",{class:"rent-items"}, RENTAL.items.map(it=>{ const free=rentFreeNow(it.id), next=free<=0?rentNextFree(it.id):null;
+      return h("div",{class:"rent-item"+(free<=0?" none":"")},
+        h("span",{class:"ri-icon","aria-hidden":"true"},it.icon),
+        h("b",{},it.name),
+        h("span",{class:"ri-count"}, free>0 ? `지금 빌릴 수 있어요 ${free}/${it.qty}` : `모두 대여 중 (0/${it.qty})`),
+        next ? h("small",{},`${rentDateLabel(next)} 반납 예정`) : null);
+    })),
+    id ? rentForm(id) : null,
+    id && mine.length ? h("div",{class:"rent-mine"}, h("b",{},`${id}반 대여`),
+      mine.sort((a,b)=>b.start.localeCompare(a.start)).map(r=>h("div",{class:"rent-row"+(rentLate(r)?" late":"")},
+        h("span",{}, `${rentItem(r.item).icon} ${rentItem(r.item).name}`),
+        h("span",{class:"muted"}, `${rentDateLabel(r.start)} ~ ${rentDateLabel(r.due)} 반납`),
+        h("span",{class:`pill rst-${r.status}`}, rentLate(r) ? "반납일 지남" : RENT_ST[r.status]),
+        r.status==="reserved" && writeAllowed("rental") && !canManage ? h("button",{class:"btn small ghost",onclick:()=>rentSet(r,"canceled","신청을 취소했어요")},"신청 취소") : null
+      ))) : null,
+    h("h3",{class:"ringtitle"}, canManage ? "대여 관리 (전교임원·선생님)" : "전체 대여 현황"),
+    all.length ? h("div",{class:"tbl-wrap"}, h("table",{class:"atbl renttbl"},
+      h("thead",{}, h("tr",{}, h("th",{},"반"), h("th",{},"물품"), h("th",{},"기간"), h("th",{},"상태"), canManage ? h("th",{},"") : null)),
+      h("tbody",{}, all.map(r=>h("tr",{class:`g${gradeOf(r.classId)}`+(r.classId===id?" mine":"")+(rentLate(r)?" late":"")},
+        h("td",{}, h("span",{class:"cls",style:"color:var(--gc)"},r.classId)),
+        h("td",{}, `${rentItem(r.item).icon} ${rentItem(r.item).name}`),
+        h("td",{}, `${rentDateLabel(r.start)} ~ ${rentDateLabel(r.due)}`),
+        h("td",{}, h("span",{class:`pill rst-${r.status}`}, rentLate(r) ? "반납일 지남" : RENT_ST[r.status])),
+        canManage ? h("td",{}, h("div",{class:"rowbtns"},
+          r.status==="reserved" ? h("button",{class:"btn small",style:"--gc:var(--ink)",onclick:()=>rentSet(r,"out","빌려줬어요. 반납일을 꼭 알려 주세요")},"빌려줌") : null,
+          r.status==="out" ? h("button",{class:"btn small",style:"--gc:var(--ok)",onclick:()=>rentSet(r,"returned","반납을 확인했어요")},"반납 확인") : null,
+          r.status!=="returned" ? h("button",{class:"btn small ghost",onclick:()=>rentSet(r,"canceled","대여를 취소했어요")},"취소") : null)) : null
+      )))
+    )) : emptyState("아직 대여 신청이 없어요", id ? "위에서 물품과 시작일을 골라 신청해요." : "각 반 페이지 → 월별 활동 → 11월에서 신청할 수 있어요.")
+  );
+}
+function rentForm(id){
+  if (!writeAllowed("rental")) return h("p",{class:"muted",style:"margin:0"},"반 비밀번호로 들어오면 신청할 수 있어요.");
+  const t=todayYmd();
+  const d=state.rentDraft && state.rentDraft.classId===id ? state.rentDraft : {classId:id, item:"", start:t};
+  const due=d.start ? ymdAdd(d.start, RENTAL.days) : "";
+  const left = d.item && d.start ? rentItem(d.item).qty - rentUsed(d.item, d.start, due) : null;
+  return h("form",{class:"rent-form",onsubmit:e=>{e.preventDefault(); rentApply(id);}},
+    h("div",{class:"row"},
+      h("label",{},"빌릴 물품", h("select",{id:"rt_item",onchange:e=>{state.rentDraft={...d,item:e.target.value};render();}},
+        h("option",{value:""},"물품 고르기"), RENTAL.items.map(it=>h("option",{value:it.id,selected:d.item===it.id},`${it.icon} ${it.name} (전체 ${it.qty})`)))),
+      h("label",{},"쓰기 시작하는 날", h("input",{type:"date",id:"rt_start",min:t,max:"2026-11-30",value:d.start,onchange:e=>{state.rentDraft={...d,start:e.target.value};render();}})),
+      h("div",{class:"rent-due"}, h("span",{},"반납일 (1주일 뒤)"), h("b",{}, due ? rentDateLabel(due) : "-"))),
+    left!=null ? h("p",{class:left>0?"rent-ok":"rent-no"}, left>0 ? `이 기간에 ${left}세트 빌릴 수 있어요.` : "이 기간에는 모두 대여 중이에요. 다른 날짜를 골라 주세요.") : null,
+    h("div",{class:"actions",style:"justify-content:flex-start"}, h("button",{class:"btn",type:"submit",disabled:!(left>0)},"대여 신청")));
+}
+async function rentApply(id){
+  const d=state.rentDraft; if (!d || d.classId!==id || !d.item || !d.start){ toast("물품과 시작일을 골라 주세요."); return; }
+  const due=ymdAdd(d.start, RENTAL.days);
+  if (rentItem(d.item).qty - rentUsed(d.item, d.start, due) <= 0){ toast("그 기간에는 모두 대여 중이에요."); return; }
+  if (state.data.rentals.some(r=>r.classId===id && r.item===d.item && (r.status==="reserved"||r.status==="out"))){ toast("이미 같은 물품을 신청했어요. 반납한 뒤에 다시 신청해요."); return; }
+  try{
+    await state.db.collection("rentals").add({classId:id, item:d.item, start:d.start, due, status:"reserved", updatedAt:Date.now()});
+    state.rentDraft=null; render();
+    toast(`${rentItem(d.item).name} 신청 완료! ${rentDateLabel(d.start)}에 전교임원에게 받아 가요`);
+  }catch(e){ toast(e?.message||"신청하지 못했어요. 다시 시도해 주세요."); }
+}
+async function rentSet(r, status, msg){
+  const {id, _w, ...rest}=r;
+  try{ await state.db.collection("rentals").doc(r.id).set({...rest, status, updatedAt:Date.now(), [status+"At"]:Date.now()}); toast(msg); }
+  catch(e){ toast(e?.message||"저장하지 못했어요. 다시 시도해 주세요."); }
 }
 
 function exerciseBoard(){
